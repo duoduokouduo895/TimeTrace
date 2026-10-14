@@ -1,0 +1,33 @@
+[package]
+name = "timetrace"
+version = "0.1.0"
+description = "每日时间记录 + 晚间复盘"
+authors = ["armstrong"]
+edition = "2024"
+
+[lib]
+# The `_lib` suffix avoids a name clash with the bin on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "timetrace_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-window-state = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.37", features = ["bundled"] }
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1"
+base64 = "0.22"
+
+# https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
