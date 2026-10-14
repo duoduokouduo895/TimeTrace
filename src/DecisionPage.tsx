@@ -87,10 +87,14 @@ export default function DecisionPage() {
             想摸鱼、犹豫要不要做某件事时，按下面设置的快捷键（或点小组件上的
             <Icon name="bolt" size={12} />），屏幕中央会弹出输入框
           </li>
-          <li>写下「现在想做什么」，比如「打一把游戏」「刷 20 分钟 B 站」「先睡个午觉」，回车</li>
           <li>
-            Jev 只回答 <b className="good">做</b> 或 <b className="bad">不做</b>，不给理由——下面的按钮点了就开始计时，不再犹豫
+            写一件事，比如「刷视频」→ Jev 只回答 <b className="good">做</b> 或 <b className="bad">不做</b>
           </li>
+          <li>
+            写几个选项，用「与 / 还是 / 或者 / 、」隔开，比如「睡觉与学习」→ Jev 直接回答其中一个，比如
+            <b className="accent-text">学习</b>
+          </li>
+          <li>不给理由，看完按 Enter 或 Esc 关掉，立刻去做</li>
         </ol>
         <HotkeyRow />
         <p className="muted small">
@@ -143,9 +147,10 @@ export default function DecisionPage() {
                 <span className="dlog-time">
                   {new Date(d.askedAt).getMonth() + 1}/{new Date(d.askedAt).getDate()} {fmtTime(d.askedAt)}
                 </span>
-                <span className={`dlog-v ${d.decision}`}>{d.decision === "do" ? "做" : "不做"}</span>
+                <span className={`dlog-v ${d.kind === "yesno" ? d.decision : "pick"}`} title={d.decision}>
+                  {d.kind === "yesno" ? (d.decision === "do" ? "做" : "不做") : d.decision}
+                </span>
                 <span className="dlog-q">{d.question}</span>
-                <span className="dlog-a">{d.action ? d.action.replace(":", " · ") : ""}</span>
               </li>
             ))}
           </ul>

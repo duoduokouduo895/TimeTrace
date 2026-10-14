@@ -1,22 +1,20 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { Verdict, api, useDaySummary } from "./api";
+import { Verdict, api } from "./api";
 import { Icon } from "./icons";
 import { Backdrop } from "./theme";
 
-const WIDTH = 460;
 const win = getCurrentWindow();
 
 type Phase = { k: "input" } | { k: "loading" } | { k: "result"; v: Verdict } | { k: "error"; msg: string };
 
-/** 屏幕中央的决策弹窗：写下想做的事 → Jev 只回答「做 / 不做」+ 一个立刻执行的按钮 */
+/** 屏幕中央的决策弹窗：只给答案——「做 / 不做」，或多个选项中的一个。不绑定任何操作。 */
 export default function DecideWindow() {
-  const { data } = useDaySummary();
   const [text, setText] = useState("");
   const [phase, setPhase] = useState<Phase>({ k: "input" });
   const inputRef = useRef<HTMLInputElement>(null);
-  const cardRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
 
@@ -26,8 +24,8 @@ export default function DecideWindow() {
     setText("");
   };
 
-  // 每次唤出：清空并聚焦输入框
   useEffect(() => {
+    // 每次唤出：清空并聚焦输入框
     const un = listen("open-decision", () => {
       setText("");
       setPhase({ k: "input" });
@@ -37,76 +35,58 @@ export default function DecideWindow() {
     const unFocus = win.onFocusChanged(({ payload: focused }) => {
       if (!focused && phaseRef.current.k !== "loading") hide();
     });
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && hide();
-    window.addEventListener("keydown", esc);
+    // Esc 随时关闭；看到答案后 Enter 也关闭
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" || (e.key === "Enter" && phaseRef.current.k === "result")) {
+        e.preventDefault();
+        hide();
+      }
+    };
+    window.addEventListener("keydown", onKey);
     return () => {
       un.then((f) => f());
       unFocus.then((f) => f());
-      window.removeEventListener("keydown", esc);
+      window.removeEventListener("keydown", onKey);
     };
   }, []);
 
-  // 窗口高度跟随卡片，并保持在屏幕中央
+  // 窗口尺寸跟随内容（含阴影留白），并保持在屏幕中央
   useLayoutEffect(() => {
-    const el = cardRef.current;
+    const el = stageRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
-      const h = Math.ceil(el.getBoundingClientRect().height);
-      win.setSize(new LogicalSize(WIDTH, h)).then(() => win.center());
+      const r = el.getBoundingClientRect();
+      win.setSize(new LogicalSize(Math.ceil(r.width), Math.ceil(r.height))).then(() => win.center());
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
   const ask = () => {
-    if (!text.trim()) return;
+    if (!text.trim() || phase.k === "loading") return;
     setPhase({ k: "loading" });
     api.decide(text).then(
       (v) => setPhase({ k: "result", v }),
       (e) =>
         setPhase({
           k: "error",
-          msg: String(e) === "NO_KEY" ? "没检测到 TYPESAFE_API_KEY。设置环境变量后需要重启 TimeTrace。" : String(e),
+          msg: String(e) === "NO_KEY" ? "没检测到 TYPESAFE_API_KEY，设置后需要重启 TimeTrace" : String(e),
         }),
     );
   };
 
-  const actOf = (id: string | null) => data?.activities.find((a) => a.id === id);
-
-  let body: React.ReactNode;
-  if (phase.k === "result") {
-    const { v } = phase;
-    const yes = v.decision === "do";
-    // 做 → 若请求本身是已记录项目，直接开始计时；不做 → 开始 Jev 建议的有益项目
-    const target = actOf(yes ? v.categoryId : v.insteadId);
-    const go = () => {
-      if (target) {
-        api.startTimer(target.id);
-        api.setDecisionAction(v.id, `开始计时:${target.name}`);
-      }
-      hide();
-    };
-    body = (
-      <div className={`dw-result ${yes ? "do" : "dont"}`}>
-        <span className="dw-q">{text}</span>
-        <span className="dw-verdict">{yes ? "做" : "不做"}</span>
-        <div className="dw-actions">
-          <button className="primary" autoFocus onClick={go}>
-            {target ? (
-              <>
-                <Icon name="play" size={11} /> {yes ? "开始计时" : "现在开始"} · {target.name}
-              </>
-            ) : yes ? (
-              "去做吧"
-            ) : (
-              "好的"
-            )}
-          </button>
-        </div>
+  return (
+    <div className="dw-stage" ref={stageRef}>
+      <div className={`dw-card ${phase.k}`}>
+        <Backdrop extraBlur={28} />
+        <div className="dw-content">{phase.k === "result" ? <Result text={text} v={phase.v} /> : renderInput()}</div>
+        {phase.k === "loading" && <div className="dw-progress" />}
       </div>
-    );
-  } else {
-    body = (
+    </div>
+  );
+
+  function renderInput() {
+    return (
       <>
         <form
           className="dw-input"
@@ -115,40 +95,52 @@ export default function DecideWindow() {
             ask();
           }}
         >
-          <Icon name="bolt" size={18} />
+          <span className="dw-orb">
+            <Icon name="bolt" size={16} />
+          </span>
           <input
             ref={inputRef}
             autoFocus
             placeholder="现在想做什么？"
             value={text}
-            disabled={phase.k === "loading"}
+            readOnly={phase.k === "loading"}
             onChange={(e) => {
               setText(e.target.value);
               if (phase.k === "error") setPhase({ k: "input" });
             }}
           />
+          <kbd className="dw-enter">↵</kbd>
         </form>
-        {phase.k === "loading" && <div className="decide-loading" />}
         {phase.k === "error" ? (
-          <div className="dw-hint err">{phase.msg}</div>
+          <div className="dw-tips err">{phase.msg}</div>
         ) : (
-          <div className="dw-hint">
+          <div className="dw-tips">
             <span>
-              <kbd>Enter</kbd> 让 Jev 决定
+              <b>刷视频</b> → 做 / 不做
             </span>
             <span>
-              <kbd>Esc</kbd> 关闭
+              <b>睡觉与学习</b> → 二选一
             </span>
+            <span className="dw-tips-end">Esc 关闭</span>
           </div>
         )}
       </>
     );
   }
+}
 
+function Result({ text, v }: { text: string; v: Verdict }) {
+  const label = v.kind === "yesno" ? (v.answer === "do" ? "做" : "不做") : v.answer;
+  const tone = v.kind === "yesno" ? (v.answer === "do" ? "do" : "dont") : "pick";
+  const len = [...label].length;
+  const size = len <= 2 ? 64 : len <= 4 ? 52 : len <= 7 ? 38 : 28;
   return (
-    <div className="dw-card" ref={cardRef} style={{ width: WIDTH }}>
-      <Backdrop extraBlur={16} />
-      <div className="dw-content">{body}</div>
+    <div className={`dw-result ${tone}`}>
+      <span className="dw-q">{text}</span>
+      <span className="dw-answer" style={{ fontSize: size }}>
+        {label}
+      </span>
+      <span className="dw-close">Enter / Esc 关闭</span>
     </div>
   );
 }

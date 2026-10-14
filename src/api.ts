@@ -71,17 +71,19 @@ export interface DecisionProfile {
 
 export interface Verdict {
   id: string;
-  decision: "do" | "dont";
-  categoryId: string | null;
-  insteadId: string | null;
+  /** yesno：做 / 不做；choice：从用户给的选项里挑一个 */
+  kind: "yesno" | "choice";
+  /** yesno 时为 do / dont；choice 时为选中的选项原文 */
+  answer: string;
 }
 
 export interface DecisionRecord {
   id: string;
   askedAt: number;
   question: string;
-  decision: "do" | "dont";
-  pDo: number | null;
+  kind: "yesno" | "choice";
+  decision: string;
+  probability: number | null;
   action: string | null;
 }
 

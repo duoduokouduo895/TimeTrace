@@ -214,37 +214,27 @@ async fn decide(app: AppHandle, question: String) -> Res<jev::Verdict> {
         return Err("先写下你想做什么".into());
     }
     let key = jev::api_key().ok_or("NO_KEY")?;
+    let options = jev::parse_options(&question);
+    let kind = if options.is_empty() { "yesno" } else { "choice" };
     // 取数据时持锁，网络请求前释放
-    let (summary, body_state, questions) = {
+    let (body_state, questions) = {
         let state = app.state::<Db>();
         let conn = state.0.lock().map_err(err)?;
         let (goals, rules) = profile_of(&conn).map_err(err)?;
         let summary = db::day_summary(&conn, None).map_err(err)?;
-        let today = summary.today.clone();
-        let mut recent = db::list_decisions(&conn, Some(&today), 8).map_err(err)?;
+        let mut recent = db::list_decisions(&conn, Some(&summary.today), 8).map_err(err)?;
         recent.reverse();
         let st = jev::build_state(&question, &goals, &rules, &summary, &recent);
-        let q = jev::build_questions(&summary);
-        (summary, st, q)
+        (st, jev::build_questions(&options))
     };
     let ans = jev::ask(&key, body_state, questions).await.map_err(err)?;
-    let id_of = |name: &Option<String>| {
-        name.as_ref()
-            .and_then(|n| summary.activities.iter().find(|a| &a.name == n))
-            .map(|a| a.id.clone())
-    };
     let d = {
         let state = app.state::<Db>();
         let conn = state.0.lock().map_err(err)?;
-        db::insert_decision(&conn, &question, &ans.decision, ans.p_do, ans.confidence).map_err(err)?
+        db::insert_decision(&conn, &question, kind, &ans.choice, ans.probability, ans.confidence).map_err(err)?
     };
     let _ = app.emit("decisions-changed", ());
-    Ok(jev::Verdict {
-        id: d.id,
-        decision: ans.decision,
-        category_id: id_of(&ans.category),
-        instead_id: id_of(&ans.instead),
-    })
+    Ok(jev::Verdict { id: d.id, kind: kind.into(), answer: ans.choice })
 }
 
 #[tauri::command]

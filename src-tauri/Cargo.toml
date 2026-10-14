@@ -1,6 +1,6 @@
 [package]
 name = "timetrace"
-version = "0.3.0"
+version = "0.3.1"
 description = "每日时间记录 + 晚间复盘"
 authors = ["armstrong"]
 edition = "2024"

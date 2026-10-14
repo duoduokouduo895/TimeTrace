@@ -31,6 +31,15 @@ html,
 body {
   margin: 0;
 }
+/* 透明窗口（小组件、决策弹窗）：根元素若声明 color-scheme: dark，
+   WebView 会把透明画布涂成深色，圆角外露出直角底色 */
+html.transparent-window {
+  color-scheme: normal;
+  background: transparent;
+}
+.widget {
+  color-scheme: dark;
+}
 body.page-widget {
   background: transparent;
   overflow: hidden;
@@ -193,7 +202,8 @@ select option {
   z-index: 0;
   pointer-events: none;
 }
-.widget .backdrop {
+.widget .backdrop,
+.dw-card .backdrop {
   position: absolute;
 }
 .backdrop-img {
@@ -1178,79 +1188,172 @@ button.icon.danger:hover {
 }
 
 /* ---------- 决策弹窗（屏幕中央） ---------- */
+/* 窗口本身透明，四周留白给柔和阴影 */
+.dw-stage {
+  display: inline-block;
+  padding: 26px 30px 38px;
+}
 .dw-card {
   position: relative;
-  border-radius: 20px;
+  width: 480px;
+  border-radius: 26px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  color-scheme: dark;
   background: #11152a;
-  animation: dw-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 28px 60px -18px rgba(0, 0, 0, 0.7),
+    0 10px 24px -12px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  animation: dw-in 0.26s cubic-bezier(0.2, 0.9, 0.25, 1.15);
+  transition: box-shadow 0.3s;
+}
+.dw-card.loading {
+  box-shadow:
+    0 28px 60px -18px rgba(0, 0, 0, 0.7),
+    0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 @keyframes dw-in {
   from {
     opacity: 0;
-    transform: scale(0.94);
+    transform: translateY(6px) scale(0.96);
   }
+}
+/* 顶部一抹高光，让玻璃有厚度 */
+.dw-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 50%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent);
+  pointer-events: none;
 }
 .dw-content {
   position: relative;
   z-index: 1;
-  padding: 18px 20px 14px;
+  padding: 18px 20px 16px;
 }
 .dw-input {
   display: flex;
   align-items: center;
   gap: 12px;
-  color: var(--accent);
+}
+.dw-orb {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 50%;
+  color: #fff;
+  background: radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--accent) 80%, #fff), var(--accent));
+  box-shadow: 0 4px 14px -4px var(--accent);
+}
+.dw-card.loading .dw-orb {
+  animation: orb 1s ease-in-out infinite;
+}
+@keyframes orb {
+  50% {
+    transform: scale(0.88);
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 20%, transparent);
+  }
 }
 .dw-input input {
   flex: 1;
   min-width: 0;
   border: none;
   background: none;
-  padding: 4px 0;
+  padding: 6px 0;
   font-size: 19px;
   font-weight: 500;
+  letter-spacing: 0.2px;
   color: var(--text);
 }
 .dw-input input:focus {
   background: none;
 }
-.dw-hint {
+.dw-enter {
+  flex: none;
+  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  color: var(--text-2);
+}
+.dw-tips {
   display: flex;
-  gap: 16px;
-  margin-top: 12px;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 0 46px;
   font-size: 11.5px;
   color: var(--muted);
 }
-.dw-hint.err {
+.dw-tips > span:not(.dw-tips-end) {
+  padding: 2px 9px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.dw-tips b {
+  font-weight: 500;
+  color: var(--text-2);
+}
+.dw-tips-end {
+  margin-left: auto;
+}
+.dw-tips.err {
   color: var(--bad);
 }
-.decide-loading {
-  height: 3px;
-  margin: 12px 0 0;
-  border-radius: 2px;
+/* 判断中：底部细线扫过 */
+.dw-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  z-index: 2;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  background-size: 50% 100%;
+  background-size: 40% 100%;
   background-repeat: no-repeat;
-  animation: scan 0.9s linear infinite;
+  animation: scan 1s linear infinite;
 }
 @keyframes scan {
   from {
-    background-position: -100% 0;
+    background-position: -60% 0;
   }
   to {
-    background-position: 200% 0;
+    background-position: 160% 0;
   }
 }
 .dw-result {
+  --tone: var(--accent);
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 6px 0 4px;
+  gap: 4px;
+  padding: 6px 0 2px;
+}
+.dw-result.do {
+  --tone: var(--good);
+}
+.dw-result.dont {
+  --tone: var(--bad);
+}
+/* 答案背后的柔光 */
+.dw-result::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  width: 260px;
+  height: 120px;
+  margin-left: -130px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--tone) 32%, transparent), transparent);
+  pointer-events: none;
 }
 .dw-q {
+  position: relative;
   max-width: 100%;
   font-size: 13px;
   color: var(--text-2);
@@ -1258,13 +1361,18 @@ button.icon.danger:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.dw-verdict {
-  font-size: 64px;
+.dw-answer {
+  position: relative;
+  max-width: 100%;
   font-weight: 800;
-  letter-spacing: 12px;
-  margin-right: -12px;
-  line-height: 1.2;
-  animation: verdict-in 0.4s cubic-bezier(0.2, 1.5, 0.4, 1);
+  letter-spacing: 0.12em;
+  margin-right: -0.12em;
+  line-height: 1.25;
+  text-align: center;
+  color: var(--tone);
+  text-shadow: 0 2px 24px color-mix(in srgb, var(--tone) 45%, transparent);
+  animation: verdict-in 0.42s cubic-bezier(0.2, 1.5, 0.4, 1);
+  word-break: break-all;
 }
 @keyframes verdict-in {
   from {
@@ -1272,33 +1380,11 @@ button.icon.danger:hover {
     transform: scale(0.7);
   }
 }
-.dw-result.do .dw-verdict {
-  color: var(--good);
-  text-shadow: 0 0 30px color-mix(in srgb, var(--good) 50%, transparent);
-}
-.dw-result.dont .dw-verdict {
-  color: var(--bad);
-  text-shadow: 0 0 30px color-mix(in srgb, var(--bad) 50%, transparent);
-}
-.dw-actions {
-  display: flex;
-  width: 100%;
-  margin-top: 10px;
-}
-.dw-actions .primary {
-  flex: 1;
-  justify-content: center;
-  padding: 9px 12px;
-  font-size: 14px;
-}
-.dw-result.dont .dw-actions .primary {
-  background: var(--bad);
-  box-shadow: 0 4px 14px -6px var(--bad);
-}
-.dw-result.do .dw-actions .primary {
-  background: var(--good);
-  color: #0b1a12;
-  box-shadow: 0 4px 14px -6px var(--good);
+.dw-close {
+  position: relative;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
 }
 
 /* ---------- 趋势 ---------- */
@@ -1619,6 +1705,20 @@ textarea.profile {
 .dlog-v.do {
   color: var(--good);
   background: color-mix(in srgb, var(--good) 15%, transparent);
+}
+.dlog-v.pick {
+  width: auto;
+  min-width: 44px;
+  max-width: 120px;
+  padding: 1px 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.accent-text {
+  color: var(--accent);
 }
 .dlog-v.dont {
   color: var(--bad);

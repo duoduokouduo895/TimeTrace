@@ -199,6 +199,18 @@ fn migrate(conn: &Connection) -> Result<()> {
         tx.pragma_update(None, "user_version", 3)?;
         tx.commit()?;
     }
+    if version < 4 {
+        // 决策支持「多选一」：kind = yesno | choice；probability = 选中答案的概率
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(
+            "ALTER TABLE decision ADD COLUMN kind TEXT NOT NULL DEFAULT 'yesno';
+             ALTER TABLE decision ADD COLUMN probability REAL;
+             UPDATE decision SET probability = CASE decision WHEN 'do' THEN p_do ELSE 1 - p_do END
+               WHERE p_do IS NOT NULL;",
+        )?;
+        tx.pragma_update(None, "user_version", 4)?;
+        tx.commit()?;
+    }
     Ok(())
 }
 
@@ -603,16 +615,20 @@ pub struct Decision {
     pub id: String,
     pub asked_at: i64,
     pub question: String,
+    /// "yesno" | "choice"
+    pub kind: String,
+    /// yesno: do / dont；choice: 选中的选项
     pub decision: String,
-    pub p_do: Option<f64>,
+    pub probability: Option<f64>,
     pub action: Option<String>,
 }
 
 pub fn insert_decision(
     conn: &Connection,
     question: &str,
+    kind: &str,
     decision: &str,
-    p_do: Option<f64>,
+    probability: Option<f64>,
     confidence: Option<f64>,
 ) -> Result<Decision> {
     let now = now_ms();
@@ -620,14 +636,15 @@ pub fn insert_decision(
         id: new_id(),
         asked_at: now,
         question: question.to_string(),
+        kind: kind.to_string(),
         decision: decision.to_string(),
-        p_do,
+        probability,
         action: None,
     };
     conn.execute(
-        "INSERT INTO decision(id,asked_at,day,question,decision,p_do,confidence,updated_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?2)",
-        params![d.id, now, day_of(now), question, decision, p_do, confidence],
+        "INSERT INTO decision(id,asked_at,day,question,kind,decision,probability,confidence,updated_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?2)",
+        params![d.id, now, day_of(now), question, kind, decision, probability, confidence],
     )?;
     Ok(d)
 }
@@ -643,7 +660,7 @@ pub fn set_decision_action(conn: &Connection, id: &str, action: &str) -> Result<
 /// 最近的决策记录；day 为 Some 时只取该归属日
 pub fn list_decisions(conn: &Connection, day: Option<&str>, limit: i64) -> Result<Vec<Decision>> {
     let mut st = conn.prepare(
-        "SELECT id,asked_at,question,decision,p_do,action FROM decision
+        "SELECT id,asked_at,question,kind,decision,probability,action FROM decision
          WHERE (?1 IS NULL OR day=?1) ORDER BY asked_at DESC LIMIT ?2",
     )?;
     let rows = st.query_map(params![day, limit], |r| {
@@ -651,9 +668,10 @@ pub fn list_decisions(conn: &Connection, day: Option<&str>, limit: i64) -> Resul
             id: r.get(0)?,
             asked_at: r.get(1)?,
             question: r.get(2)?,
-            decision: r.get(3)?,
-            p_do: r.get(4)?,
-            action: r.get(5)?,
+            kind: r.get(3)?,
+            decision: r.get(4)?,
+            probability: r.get(5)?,
+            action: r.get(6)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -776,8 +794,8 @@ mod tests {
         assert_eq!(r.rows.len(), 1);
         assert_eq!(r.rows[0].seconds, 900);
 
-        let d = insert_decision(&conn, "打游戏", "dont", Some(0.1), Some(0.8)).unwrap();
-        insert_decision(&conn, "背单词", "do", Some(0.9), Some(0.8)).unwrap();
+        let d = insert_decision(&conn, "打游戏", "yesno", "dont", Some(0.9), Some(0.8)).unwrap();
+        insert_decision(&conn, "睡觉与学习", "choice", "学习", Some(0.7), Some(0.5)).unwrap();
         set_decision_action(&conn, &d.id, "开始计时:背单词").unwrap();
         let list = list_decisions(&conn, Some(&day_of(now_ms())), 10).unwrap();
         assert_eq!(list.len(), 2);

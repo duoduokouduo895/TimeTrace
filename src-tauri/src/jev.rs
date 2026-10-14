@@ -1,4 +1,6 @@
-//! 防拖延决策助手：把「此刻的情境」交给 Jev（TypeSafe AI System One），只要「做 / 不做」。
+//! 防拖延决策助手：把「此刻的情境」交给 Jev（TypeSafe AI System One），只要一个答案。
+//! - 单件事（「刷视频」）→ 做 / 不做
+//! - 多个选项（「睡觉与学习」「A 还是 B」）→ 直接回答其中一个选项
 //! 文档：https://docs.typesafe.ai/introduction/quickstart
 //!
 //! Jev 是判断型模型：state（情境）+ questions（选择题）→ 每题的选项与概率，不生成解释。
@@ -51,12 +53,34 @@ or it repeats a request that was recently refused.";
 #[serde(rename_all = "camelCase")]
 pub struct Verdict {
     pub id: String,
-    /// "do" | "dont"
-    pub decision: String,
-    /// 请求所属的已记录项目（做 → 可直接开始计时）
-    pub category_id: Option<String>,
-    /// 不做时建议立刻开始的有益项目
-    pub instead_id: Option<String>,
+    /// "yesno" | "choice"
+    pub kind: String,
+    /// yesno: "do" | "dont"；choice: 选中的选项原文
+    pub answer: String,
+}
+
+/// 用户输入里的分隔词。单字分隔符容易误伤词语（如「参与」），所以拆出的每段至少 2 个字才算多选。
+const SEPARATORS: [&str; 12] = ["还是", "或者", "或是", " vs ", " VS ", " or ", "与", "或", "、", "/", "／", "|"];
+const SEP_MARK: char = '\u{1F}';
+
+/// 把输入拆成选项；不足 2 个有效选项时返回空，表示按「做 / 不做」处理
+pub fn parse_options(input: &str) -> Vec<String> {
+    let mut s = input.trim().to_string();
+    for sep in SEPARATORS {
+        s = s.replace(sep, &SEP_MARK.to_string());
+    }
+    let trim: &[char] = &[' ', '?', '？', '。', '.', '!', '！', ',', '，', '：', ':'];
+    let mut out: Vec<String> = Vec::new();
+    for part in s.split(SEP_MARK) {
+        let p = part.trim_matches(trim).to_string();
+        if p.chars().count() < 2 {
+            return Vec::new();
+        }
+        if !out.contains(&p) {
+            out.push(p);
+        }
+    }
+    if out.len() >= 2 { out } else { Vec::new() }
 }
 
 #[derive(Deserialize)]
@@ -135,58 +159,42 @@ pub fn build_state(
     })
 }
 
-pub fn build_questions(s: &DaySummary) -> Value {
-    let mut q = serde_json::Map::new();
-    q.insert(
-        "decision".into(),
+const CHOICE_INSTRUCTIONS: &str = "\
+The user struggles with procrastination and is torn between the options below right now (user_request lists them). \
+Pick the ONE option that is best for the user's long-term goals (personal_goals) under the user's own decision_rules, \
+taking into account current_time, today_progress, timer_running and recent_decisions_today. \
+Prefer beneficial work over entertainment unless the rules clearly allow the alternative at this time \
+(for example sleep when it is late, or a necessity such as eating).";
+
+/// options 为空 → 做 / 不做；否则 → 从选项里挑一个
+pub fn build_questions(options: &[String]) -> Value {
+    if options.is_empty() {
         json!({
-            "type": "choice",
-            "instructions": DECISION_INSTRUCTIONS,
-            "criteria": { "do": DO_DESC, "dont": DONT_DESC },
-        }),
-    );
-    if !s.activities.is_empty() {
-        let mut c = serde_json::Map::new();
-        for a in &s.activities {
-            let kind = if a.kind == "gain" { "beneficial" } else { "consuming" };
-            c.insert(a.name.clone(), json!(format!("The user's tracked {kind} activity \"{}\"", a.name)));
-        }
-        c.insert("none".into(), json!("The request is not any of the tracked activities"));
-        q.insert(
-            "category".into(),
-            json!({
+            "decision": {
                 "type": "choice",
-                "instructions": "Which of the user's tracked activities is the user_request itself?",
-                "criteria": c,
-            }),
-        );
-    }
-    let gains: Vec<_> = s.activities.iter().filter(|a| a.kind == "gain").collect();
-    if !gains.is_empty() {
-        let mut c = serde_json::Map::new();
-        for a in gains {
-            let done = s.totals.get(&a.id).copied().unwrap_or(0) / 60;
-            c.insert(a.name.clone(), json!(format!("{} min done today, daily target {} min", done, a.daily_minutes)));
-        }
-        q.insert(
-            "instead".into(),
-            json!({
+                "instructions": DECISION_INSTRUCTIONS,
+                "criteria": { "do": DO_DESC, "dont": DONT_DESC },
+            }
+        })
+    } else {
+        let criteria: serde_json::Map<String, Value> =
+            options.iter().map(|o| (o.clone(), json!(format!("Do \"{o}\" now")))).collect();
+        json!({
+            "decision": {
                 "type": "choice",
-                "instructions": "If the user should not do the request, which beneficial activity should they start right now instead? \
-                                 Prefer the one furthest behind its daily target that fits the current time.",
-                "criteria": c,
-            }),
-        );
+                "instructions": CHOICE_INSTRUCTIONS,
+                "criteria": criteria,
+            }
+        })
     }
-    Value::Object(q)
 }
 
 pub struct Answer {
-    pub decision: String,
-    pub p_do: Option<f64>,
+    /// 选中的选项（做/不做时为 do / dont）
+    pub choice: String,
+    /// 选中项的概率
+    pub probability: Option<f64>,
     pub confidence: Option<f64>,
-    pub category: Option<String>,
-    pub instead: Option<String>,
 }
 
 pub async fn ask(key: &str, state: Value, questions: Value) -> Result<Answer> {
@@ -215,15 +223,16 @@ pub async fn ask(key: &str, state: Value, questions: Value) -> Result<Answer> {
         }
         break r.json::<ApiResponse>().await?;
     };
-    let choice = |id: &str| resp.answers.get(id).and_then(|a| a.get("choice")).and_then(|c| c.as_str()).map(String::from);
-    let decision = choice("decision").ok_or_else(|| anyhow!("Jev 没有返回 decision"))?;
-    let dec = resp.answers.get("decision");
+    let dec = resp.answers.get("decision").ok_or_else(|| anyhow!("Jev 没有返回结果"))?;
+    let choice = dec
+        .get("choice")
+        .and_then(|c| c.as_str())
+        .ok_or_else(|| anyhow!("Jev 没有返回选项"))?
+        .to_string();
     Ok(Answer {
-        p_do: dec.and_then(|a| a.pointer("/probabilities/do")).and_then(|v| v.as_f64()),
-        confidence: dec.and_then(|a| a.get("confidence")).and_then(|v| v.as_f64()),
-        decision,
-        category: choice("category").filter(|c| c != "none"),
-        instead: choice("instead"),
+        probability: dec.get("probabilities").and_then(|p| p.get(&choice)).and_then(|v| v.as_f64()),
+        confidence: dec.get("confidence").and_then(|v| v.as_f64()),
+        choice,
     })
 }
 
@@ -247,17 +256,28 @@ mod tests {
     }
 
     #[test]
-    fn questions_cover_activities() {
-        let s = summary();
-        let q = build_questions(&s);
+    fn parses_options() {
+        assert_eq!(parse_options("睡觉与学习"), ["睡觉", "学习"]);
+        assert_eq!(parse_options("打游戏还是背单词？"), ["打游戏", "背单词"]);
+        assert_eq!(parse_options("刷视频 / 跟读 / 睡觉"), ["刷视频", "跟读", "睡觉"]);
+        assert_eq!(parse_options("看书、跑步"), ["看书", "跑步"]);
+        assert!(parse_options("刷视频").is_empty());
+        // 「与」只拆出 1 个字 → 不算多选
+        assert!(parse_options("参与开源项目").is_empty());
+        // 去重后只剩 1 个
+        assert!(parse_options("学习与学习").is_empty());
+    }
+
+    #[test]
+    fn questions_shape() {
+        let q = build_questions(&[]);
         assert_eq!(q["decision"]["criteria"].as_object().unwrap().len(), 2);
-        let cat = q["category"]["criteria"].as_object().unwrap();
-        assert!(cat.contains_key("刷视频") && cat.contains_key("none"));
-        let inst = q["instead"]["criteria"].as_object().unwrap();
-        assert_eq!(inst.len(), 3); // 只有有益项
-        let st = build_state("打一把游戏", DEFAULT_GOALS, DEFAULT_RULES, &s, &[]);
+        let q = build_questions(&["睡觉".into(), "学习".into()]);
+        let c = q["decision"]["criteria"].as_object().unwrap();
+        assert!(c.contains_key("睡觉") && c.contains_key("学习"));
+        let s = summary();
+        let st = build_state("刷视频", DEFAULT_GOALS, DEFAULT_RULES, &s, &[]);
         assert_eq!(st["today_progress"].as_array().unwrap().len(), 4);
-        assert_eq!(st["today_progress"][3]["daily_limit_minutes"], 60);
     }
 
     /// 真实调用 Jev（需要 TYPESAFE_API_KEY）：cargo test --lib live_jev -- --ignored --nocapture
@@ -266,10 +286,11 @@ mod tests {
     fn live_jev() {
         let key = api_key().expect("TYPESAFE_API_KEY not set");
         let s = summary();
-        for q in ["打一把王者荣耀", "背 30 分钟单词", "去吃午饭"] {
+        for q in ["睡觉与学习", "刷视频", "打游戏还是背单词", "背 30 分钟单词"] {
+            let opts = parse_options(q);
             let st = build_state(q, DEFAULT_GOALS, DEFAULT_RULES, &s, &[]);
-            let a = tauri::async_runtime::block_on(ask(&key, st, build_questions(&s))).unwrap();
-            println!("{q} => {} (p_do={:?}, conf={:?}, category={:?}, instead={:?})", a.decision, a.p_do, a.confidence, a.category, a.instead);
+            let a = tauri::async_runtime::block_on(ask(&key, st, build_questions(&opts))).unwrap();
+            println!("{q} => {} (p={:?}, conf={:?})", a.choice, a.probability, a.confidence);
         }
     }
 }
