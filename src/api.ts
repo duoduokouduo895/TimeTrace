@@ -52,6 +52,14 @@ export interface DayStat {
   reviewed: boolean;
 }
 
+export interface ReminderConfig {
+  enabled: boolean;
+  time: string;
+  sound: boolean;
+}
+
+export const DEFAULT_REMINDER: ReminderConfig = { enabled: true, time: "22:30", sound: true };
+
 export const api = {
   daySummary: (day?: string) => invoke<DaySummary>("day_summary", { day }),
   monthOverview: (month: string) => invoke<DayStat[]>("month_overview", { month }),
@@ -63,6 +71,13 @@ export const api = {
   clearBackground: () => invoke<void>("clear_background"),
   dataDir: () => invoke<string>("data_dir"),
   openDataDir: () => invoke<void>("open_data_dir"),
+  reminderPending: () => invoke<boolean>("reminder_pending"),
+  snoozeReminder: (minutes: number) => invoke<void>("snooze_reminder", { minutes }),
+  dismissReminder: () => invoke<void>("dismiss_reminder"),
+  testReminder: () => invoke<void>("test_reminder"),
+  playChime: () => invoke<void>("play_chime"),
+  getAutostart: () => invoke<{ enabled: boolean; available: boolean }>("get_autostart"),
+  setAutostart: (enabled: boolean) => invoke<void>("set_autostart", { enabled }),
   saveActivity: (activity: Omit<Activity, "id" | "sort"> & { id?: string }) =>
     invoke<string>("save_activity", { activity }),
   deleteActivity: (id: string) => invoke<void>("delete_activity", { id }),

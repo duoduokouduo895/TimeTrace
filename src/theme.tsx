@@ -21,6 +21,8 @@ export const SCALE_MIN = 0.75;
 export const SCALE_MAX = 1.6;
 
 interface ThemeState {
+  /** 全部设置项原始值 */
+  settings: Record<string, unknown>;
   theme: Theme;
   pinned: boolean;
   background: string | null;
@@ -38,6 +40,7 @@ export function useTheme() {
 
 /** 加载主题设置与背景图，写入 CSS 变量；任一窗口修改后全部同步 */
 export function ThemeRoot({ children }: { children: React.ReactNode }) {
+  const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [theme, setTheme] = useState<Theme>(DEFAULT_THEME);
   const [pinned, setPinned] = useState(true);
   const [background, setBackground] = useState<string | null>(null);
@@ -47,6 +50,7 @@ export function ThemeRoot({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const load = async () => {
       const [s, bg] = await Promise.all([api.getSettings(), api.getBackground()]);
+      setSettings(s);
       setTheme({ ...DEFAULT_THEME, ...((s.theme as Partial<Theme>) ?? {}) });
       setPinned(s.pinned !== false);
       setBackground(bg);
@@ -77,6 +81,7 @@ export function ThemeRoot({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<ThemeState>(
     () => ({
+      settings,
       theme,
       pinned,
       background,
@@ -87,7 +92,7 @@ export function ThemeRoot({ children }: { children: React.ReactNode }) {
         await api.setSetting("theme", next);
       },
     }),
-    [theme, pinned, background, accent],
+    [settings, theme, pinned, background, accent],
   );
 
   return ready ? <Ctx.Provider value={value}>{children}</Ctx.Provider> : null;

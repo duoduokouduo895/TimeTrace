@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
+  DEFAULT_REMINDER,
   DaySummary,
+  ReminderConfig,
   Kind,
   Review as ReviewData,
   api,
@@ -46,7 +48,7 @@ export default function Review() {
                   [
                     ["review", "复盘"],
                     ["activities", "项目"],
-                    ["appearance", "外观"],
+                    ["appearance", "设置"],
                   ] as const
                 ).map(([k, label]) => (
                   <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
@@ -739,6 +741,8 @@ function Appearance() {
         </div>
       </Card>
 
+      <ReminderCard />
+
       <Card title="数据">
         <div className="row">
           <code className="path">{dir}</code>
@@ -749,6 +753,96 @@ function Appearance() {
         <p className="muted small">timetrace.db 是全部记录，theme/ 下是背景图。备份时复制整个文件夹即可。</p>
       </Card>
     </>
+  );
+}
+
+function ReminderCard() {
+  const { settings } = useTheme();
+  const cfg: ReminderConfig = { ...DEFAULT_REMINDER, ...((settings.reminder as Partial<ReminderConfig>) ?? {}) };
+  const [time, setTime] = useState(cfg.time);
+  const [auto, setAuto] = useState<{ enabled: boolean; available: boolean } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => setTime(cfg.time), [cfg.time]);
+  useEffect(() => {
+    api.getAutostart().then(setAuto, (e) => setErr(String(e)));
+  }, []);
+
+  const save = (patch: Partial<ReminderConfig>) => api.setSetting("reminder", { ...cfg, ...patch });
+
+  return (
+    <>
+      <Card title="复盘提醒" hint="到点且当天还没写复盘时，小组件弹出提醒并播放提示音">
+        <div className="opt-list">
+          <div className="opt">
+            <span>每晚提醒</span>
+            <Switch on={cfg.enabled} onChange={(v) => save({ enabled: v })} />
+          </div>
+          <div className={`opt ${cfg.enabled ? "" : "disabled"}`}>
+            <span>提醒时间</span>
+            <input
+              type="time"
+              value={time}
+              disabled={!cfg.enabled}
+              onChange={(e) => setTime(e.target.value)}
+              onBlur={() => time && time !== cfg.time && save({ time })}
+            />
+          </div>
+          <div className={`opt ${cfg.enabled ? "" : "disabled"}`}>
+            <span>提示音</span>
+            <span className="row">
+              <button className="ghost small" onClick={() => api.playChime()}>
+                ▶ 试听
+              </button>
+              <Switch on={cfg.sound} disabled={!cfg.enabled} onChange={(v) => save({ sound: v })} />
+            </span>
+          </div>
+          <div className="opt">
+            <span className="muted small">点「测试」立刻触发一次，看看小组件上的效果</span>
+            <button className="ghost small" onClick={() => api.testReminder()}>
+              测试提醒
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      <Card title="启动">
+        <div className="opt-list">
+          <div className={`opt ${auto?.available ? "" : "disabled"}`}>
+            <span>
+              开机自动启动
+              {auto && !auto.available && <span className="muted small">（开发版不可用，请在安装版里开启）</span>}
+            </span>
+            <Switch
+              on={!!auto?.enabled}
+              disabled={!auto?.available}
+              onChange={(v) =>
+                api.setAutostart(v).then(
+                  () => api.getAutostart().then(setAuto),
+                  (e) => setErr(String(e)),
+                )
+              }
+            />
+          </div>
+          <p className="muted small">提醒依赖程序在运行，建议开启，否则当天没打开 TimeTrace 就不会提醒。</p>
+        </div>
+        {err && <div className="r-err">{err}</div>}
+      </Card>
+    </>
+  );
+}
+
+function Switch(props: { on: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={props.on}
+      className={`switch ${props.on ? "on" : ""}`}
+      disabled={props.disabled}
+      onClick={() => props.onChange(!props.on)}
+    >
+      <i />
+    </button>
   );
 }
 

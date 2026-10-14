@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import {
   Activity,
   DaySummary,
@@ -27,9 +28,19 @@ export default function Widget() {
   const [adding, setAdding] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [scale, setScale] = useState(theme.widgetScale);
+  const [remind, setRemind] = useState(false);
   const outerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setScale(theme.widgetScale), [theme.widgetScale]);
+
+  // 复盘提醒：启动时查一次，之后听后端事件
+  useEffect(() => {
+    api.reminderPending().then(setRemind);
+    const unlisten = listen<boolean>("reminder", (e) => setRemind(e.payload));
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
 
   // 窗口尺寸跟随内容（含缩放）
   useLayoutEffect(() => {
@@ -121,6 +132,33 @@ export default function Widget() {
               </button>
             </div>
           </header>
+
+          {remind && (
+            <div className="w-remind">
+              <span className="w-remind-icon">
+                <Icon name="moon" size={16} />
+              </span>
+              <span className="w-remind-text">
+                <b>该复盘啦</b>
+                <span>花一分钟回顾今天</span>
+              </span>
+              <button
+                className="primary small"
+                onClick={() => {
+                  api.openReview().catch(fail);
+                  api.dismissReminder();
+                }}
+              >
+                去复盘
+              </button>
+              <button className="icon" title="10 分钟后再提醒" onClick={() => api.snoozeReminder(10)}>
+                <span className="snooze">10′</span>
+              </button>
+              <button className="icon" title="今天不再提醒" onClick={() => api.dismissReminder()}>
+                <Icon name="close" size={12} />
+              </button>
+            </div>
+          )}
 
           {(error || msg) && <div className="w-msg">{error ?? msg}</div>}
 

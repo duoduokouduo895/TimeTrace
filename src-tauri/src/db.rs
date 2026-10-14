@@ -471,6 +471,16 @@ fn get_review(conn: &Connection, day: &str) -> Result<Review> {
         .unwrap_or_else(|| Review { day: day.to_string(), ..Default::default() }))
 }
 
+/// 该日是否已写过复盘（任一字段非空即算）
+pub fn has_review(conn: &Connection, day: &str) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM review WHERE day=?1
+         AND (best<>'' OR worst<>'' OR tomorrow<>'' OR score IS NOT NULL))",
+        params![day],
+        |r| r.get(0),
+    )?)
+}
+
 pub fn save_review(conn: &Connection, r: Review) -> Result<()> {
     conn.execute(
         "INSERT INTO review(day,best,worst,tomorrow,score,updated_at) VALUES(?1,?2,?3,?4,?5,?6)

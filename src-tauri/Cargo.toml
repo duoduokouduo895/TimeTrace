@@ -1,6 +1,6 @@
 [package]
 name = "timetrace"
-version = "0.1.0"
+version = "0.2.0"
 description = "每日时间记录 + 晚间复盘"
 authors = ["armstrong"]
 edition = "2024"
@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-window-state = "2"
+tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.37", features = ["bundled"] }
@@ -23,6 +24,9 @@ chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 base64 = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Media_Audio"] }
 
 # https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

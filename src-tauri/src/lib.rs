@@ -1,4 +1,5 @@
 mod db;
+mod reminder;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -8,8 +9,9 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_autostart::ManagerExt;
 
-struct Db(Mutex<Connection>);
+pub(crate) struct Db(pub(crate) Mutex<Connection>);
 
 /// 数据目录：数据库 + 主题图片
 struct DataDir(PathBuf);
@@ -101,6 +103,9 @@ fn get_settings(state: State<Db>) -> Res<HashMap<String, serde_json::Value>> {
 #[tauri::command]
 fn set_setting(app: AppHandle, state: State<Db>, key: String, value: serde_json::Value) -> Res<()> {
     with_db(&state, |c| db::set_setting(c, &key, &value))?;
+    if key == "reminder" {
+        reminder::reset(&app);
+    }
     let _ = app.emit("settings-changed", ());
     Ok(())
 }
@@ -162,6 +167,58 @@ fn open_data_dir(dir: State<DataDir>) -> Res<()> {
     Ok(())
 }
 
+// ---------- 提醒 / 自启 ----------
+
+#[tauri::command]
+fn reminder_pending(app: AppHandle) -> bool {
+    reminder::pending(&app)
+}
+
+#[tauri::command]
+fn snooze_reminder(app: AppHandle, minutes: i64) {
+    reminder::snooze(&app, minutes);
+}
+
+#[tauri::command]
+fn dismiss_reminder(app: AppHandle) {
+    reminder::dismiss(&app);
+}
+
+#[tauri::command]
+fn test_reminder(app: AppHandle) {
+    reminder::test(&app);
+}
+
+#[tauri::command]
+fn play_chime() {
+    reminder::play_chime();
+}
+
+/// 开发版注册的是 debug exe 的路径，只允许在安装版里开启自启
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AutostartInfo {
+    enabled: bool,
+    available: bool,
+}
+
+#[tauri::command]
+fn get_autostart(app: AppHandle) -> Res<AutostartInfo> {
+    Ok(AutostartInfo {
+        enabled: app.autolaunch().is_enabled().map_err(err)?,
+        available: !cfg!(debug_assertions),
+    })
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Res<()> {
+    if cfg!(debug_assertions) {
+        return Err("开发版不支持开机自启，请在安装版里设置".into());
+    }
+    let al = app.autolaunch();
+    if enabled { al.enable() } else { al.disable() }.map_err(err)
+}
+
 // 在命令里建窗口需要 async，否则 Windows 上会死锁
 #[tauri::command]
 async fn open_review(app: AppHandle) -> Res<()> {
@@ -196,6 +253,7 @@ fn resolve_data_dir() -> PathBuf {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .setup(|app| {
             let dir = resolve_data_dir();
             std::fs::create_dir_all(&dir)?;
@@ -217,6 +275,8 @@ pub fn run() {
             }
             app.manage(Db(Mutex::new(conn)));
             app.manage(DataDir(dir));
+            app.manage(reminder::Reminder(Default::default()));
+            reminder::spawn(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -245,6 +305,13 @@ pub fn run() {
             data_dir,
             open_data_dir,
             open_review,
+            reminder_pending,
+            snooze_reminder,
+            dismiss_reminder,
+            test_reminder,
+            play_chime,
+            get_autostart,
+            set_autostart,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -50,7 +50,16 @@ tt log <活动名> <时长> [--start HH:MM] [--day YYYY-MM-DD] [--note 文本]
 tt today            # 输出今日汇总（JSON，可供模型读取）
 ```
 
+## 复盘提醒
+
+- 后台线程（`src-tauri/src/reminder.rs`）每 15 秒检查；到点且当天未复盘 → 恢复小组件窗口、播放内嵌 WAV（Win32 `PlaySoundW`）、发 `reminder` 事件
+- 每个归属日最多自动提醒一次；可稍后提醒（snooze）；修改提醒时间后当天按新时间重新计算
+- 设置项 `reminder`：`{ enabled, time: "HH:MM", sound }`
+
 ## 防拖延决策助手（后期）
+
+- Jev（TypeSafe AI）文档：https://docs.typesafe.ai/introduction/quickstart
+- API Key 放在用户环境变量 `JEV_API_KEY`，只在 Rust 后端读取
 
 输入「现在想做 X / 应该做 Y」→ 提供给模型：
 - 个人目标档案（长期目标，如面试准备、口语提升）
