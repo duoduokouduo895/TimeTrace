@@ -27,6 +27,8 @@ const paths = {
     </>
   ),
   check: <path d="M3.5 8.5l3 3 6-7" />,
+  bolt: <path d="M9 1.8L3.8 9h4l-1 5.2L12.2 7h-4z" />,
+  chart: <path d="M2.5 13.5h11M4.5 11V8M8 11V4.5M11.5 11V6.5" />,
 };
 
 export type IconName = keyof typeof paths;

@@ -52,6 +52,39 @@ export interface DayStat {
   reviewed: boolean;
 }
 
+export interface RangeStats {
+  from: string;
+  to: string;
+  today: string;
+  activities: Activity[];
+  rows: { day: string; activityId: string; seconds: number }[];
+  reviewed: string[];
+}
+
+export interface DecisionProfile {
+  goals: string;
+  rules: string;
+  defaultGoals: string;
+  defaultRules: string;
+  hasKey: boolean;
+}
+
+export interface Verdict {
+  id: string;
+  decision: "do" | "dont";
+  categoryId: string | null;
+  insteadId: string | null;
+}
+
+export interface DecisionRecord {
+  id: string;
+  askedAt: number;
+  question: string;
+  decision: "do" | "dont";
+  pDo: number | null;
+  action: string | null;
+}
+
 export interface ReminderConfig {
   enabled: boolean;
   time: string;
@@ -71,6 +104,14 @@ export const api = {
   clearBackground: () => invoke<void>("clear_background"),
   dataDir: () => invoke<string>("data_dir"),
   openDataDir: () => invoke<void>("open_data_dir"),
+  rangeStats: (from: string, to: string) => invoke<RangeStats>("range_stats", { from, to }),
+  decisionProfile: () => invoke<DecisionProfile>("decision_profile"),
+  openDecide: () => invoke<void>("open_decide"),
+  hotkeyStatus: () => invoke<{ hotkey: string; ok: boolean }>("hotkey_status"),
+  setHotkey: (hotkey: string) => invoke<{ hotkey: string; ok: boolean }>("set_hotkey", { hotkey }),
+  decide: (question: string) => invoke<Verdict>("decide", { question }),
+  listDecisions: (limit: number, day?: string) => invoke<DecisionRecord[]>("list_decisions", { day, limit }),
+  setDecisionAction: (id: string, action: string) => invoke<void>("set_decision_action", { id, action }),
   reminderPending: () => invoke<boolean>("reminder_pending"),
   snoozeReminder: (minutes: number) => invoke<void>("snooze_reminder", { minutes }),
   dismissReminder: () => invoke<void>("dismiss_reminder"),

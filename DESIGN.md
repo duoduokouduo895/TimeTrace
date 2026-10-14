@@ -59,7 +59,13 @@ tt today            # 输出今日汇总（JSON，可供模型读取）
 ## 防拖延决策助手（后期）
 
 - Jev（TypeSafe AI）文档：https://docs.typesafe.ai/introduction/quickstart
-- API Key 放在用户环境变量 `JEV_API_KEY`，只在 Rust 后端读取
+- 接口：`POST https://api.typesafe.ai/v1/systemone`，模型 `jev-latest`；Jev 是判断型模型（state + 选择题 → 选项与概率），不生成解释，天然满足「只要做/不做」
+- 实现：`src-tauri/src/jev.rs`。一次请求并行问三题：`decision`（do/dont）、`category`（请求属于哪个已记录项目）、`instead`（不做时该开始哪个有益项目）
+- state（英文字段名）：当前时间、请求原文、个人目标档案、判断准则、今日各项进度与状态、正在计时、今日已问过的决策（防止反复问）
+- Jev 以英文为主要训练语言，题干与选项描述用英文；用户档案/准则可中文
+- 决策记录存 `decision` 表（含 p_do、随后点击的动作），复盘页「决策」查看
+- API Key：用户环境变量 `TYPESAFE_API_KEY`（兼容 `JEV_API_KEY`），只在 Rust 后端读取
+- 决策入口是屏幕中央的弹窗（`decide` 窗口，启动时隐藏创建、唤出即显示，失焦/Esc 收起）；全局快捷键默认 `Ctrl+Alt+D`，可在「决策」页更换，被占用时不影响启动
 
 输入「现在想做 X / 应该做 Y」→ 提供给模型：
 - 个人目标档案（长期目标，如面试准备、口语提升）

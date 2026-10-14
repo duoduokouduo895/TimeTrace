@@ -1,4 +1,5 @@
 mod db;
+mod jev;
 mod reminder;
 
 use std::collections::HashMap;
@@ -167,6 +168,183 @@ fn open_data_dir(dir: State<DataDir>) -> Res<()> {
     Ok(())
 }
 
+// ---------- 趋势 ----------
+
+#[tauri::command]
+fn range_stats(state: State<Db>, from: String, to: String) -> Res<db::RangeStats> {
+    with_db(&state, |c| db::range_stats(c, &from, &to))
+}
+
+// ---------- 决策助手 ----------
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DecisionProfile {
+    goals: String,
+    rules: String,
+    default_goals: &'static str,
+    default_rules: &'static str,
+    has_key: bool,
+}
+
+fn profile_of(c: &Connection) -> anyhow::Result<(String, String)> {
+    let p = db::get_settings(c)?.remove("decisionProfile").unwrap_or_default();
+    let field = |k: &str, d: &str| {
+        p.get(k).and_then(|v| v.as_str()).filter(|v| !v.trim().is_empty()).unwrap_or(d).to_string()
+    };
+    Ok((field("goals", jev::DEFAULT_GOALS), field("rules", jev::DEFAULT_RULES)))
+}
+
+#[tauri::command]
+fn decision_profile(state: State<Db>) -> Res<DecisionProfile> {
+    let (goals, rules) = with_db(&state, profile_of)?;
+    Ok(DecisionProfile {
+        goals,
+        rules,
+        default_goals: jev::DEFAULT_GOALS,
+        default_rules: jev::DEFAULT_RULES,
+        has_key: jev::api_key().is_some(),
+    })
+}
+
+#[tauri::command]
+async fn decide(app: AppHandle, question: String) -> Res<jev::Verdict> {
+    let question = question.trim().to_string();
+    if question.is_empty() {
+        return Err("先写下你想做什么".into());
+    }
+    let key = jev::api_key().ok_or("NO_KEY")?;
+    // 取数据时持锁，网络请求前释放
+    let (summary, body_state, questions) = {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().map_err(err)?;
+        let (goals, rules) = profile_of(&conn).map_err(err)?;
+        let summary = db::day_summary(&conn, None).map_err(err)?;
+        let today = summary.today.clone();
+        let mut recent = db::list_decisions(&conn, Some(&today), 8).map_err(err)?;
+        recent.reverse();
+        let st = jev::build_state(&question, &goals, &rules, &summary, &recent);
+        let q = jev::build_questions(&summary);
+        (summary, st, q)
+    };
+    let ans = jev::ask(&key, body_state, questions).await.map_err(err)?;
+    let id_of = |name: &Option<String>| {
+        name.as_ref()
+            .and_then(|n| summary.activities.iter().find(|a| &a.name == n))
+            .map(|a| a.id.clone())
+    };
+    let d = {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().map_err(err)?;
+        db::insert_decision(&conn, &question, &ans.decision, ans.p_do, ans.confidence).map_err(err)?
+    };
+    let _ = app.emit("decisions-changed", ());
+    Ok(jev::Verdict {
+        id: d.id,
+        decision: ans.decision,
+        category_id: id_of(&ans.category),
+        instead_id: id_of(&ans.instead),
+    })
+}
+
+#[tauri::command]
+fn list_decisions(state: State<Db>, day: Option<String>, limit: i64) -> Res<Vec<db::Decision>> {
+    with_db(&state, |c| db::list_decisions(c, day.as_deref(), limit))
+}
+
+#[tauri::command]
+fn set_decision_action(app: AppHandle, state: State<Db>, id: String, action: String) -> Res<()> {
+    with_db(&state, |c| db::set_decision_action(c, &id, &action))?;
+    let _ = app.emit("decisions-changed", ());
+    Ok(())
+}
+
+/// 屏幕中央的决策弹窗：启动时隐藏创建，唤出时只需显示，速度快
+fn create_decide_window(app: &AppHandle) -> tauri::Result<()> {
+    WebviewWindowBuilder::new(app, "decide", WebviewUrl::App("index.html".into()))
+        .title("TimeTrace · 做不做")
+        .inner_size(460.0, 120.0)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .visible(false)
+        .center()
+        .build()?;
+    Ok(())
+}
+
+/// 唤出决策弹窗（全局快捷键 / 小组件闪电按钮）
+fn summon_decision(app: &AppHandle) {
+    if app.get_webview_window("decide").is_none() {
+        let _ = create_decide_window(app);
+    }
+    if let Some(w) = app.get_webview_window("decide") {
+        let _ = w.center();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+    let _ = app.emit_to("decide", "open-decision", ());
+}
+
+const DEFAULT_HOTKEY: &str = "ctrl+alt+d";
+
+/// (快捷键, 是否注册成功)
+struct Hotkey(Mutex<(String, bool)>);
+
+fn with_conn<T>(app: &AppHandle, f: impl FnOnce(&Connection) -> anyhow::Result<T>) -> anyhow::Result<T> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
+    f(&conn)
+}
+
+fn register_hotkey(app: &AppHandle, hk: &str) -> bool {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    match gs.register(hk) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("hotkey {hk}: {e}");
+            false
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HotkeyStatus {
+    hotkey: String,
+    ok: bool,
+}
+
+#[tauri::command]
+fn hotkey_status(hk: State<Hotkey>) -> Res<HotkeyStatus> {
+    let g = hk.0.lock().map_err(err)?;
+    Ok(HotkeyStatus { hotkey: g.0.clone(), ok: g.1 })
+}
+
+#[tauri::command]
+fn set_hotkey(app: AppHandle, state: State<Db>, hk: State<Hotkey>, hotkey: String) -> Res<HotkeyStatus> {
+    let mut g = hk.0.lock().map_err(err)?;
+    if register_hotkey(&app, &hotkey) {
+        with_db(&state, |c| db::set_setting(c, "decideHotkey", &serde_json::json!(hotkey)))?;
+        *g = (hotkey, true);
+        Ok(HotkeyStatus { hotkey: g.0.clone(), ok: true })
+    } else {
+        // 新的也被占用：恢复原来的
+        g.1 = register_hotkey(&app, &g.0);
+        Err(format!("{hotkey} 已被其他程序占用，换一个试试"))
+    }
+}
+
+#[tauri::command]
+async fn open_decide(app: AppHandle) {
+    summon_decision(&app);
+}
+
 // ---------- 提醒 / 自启 ----------
 
 #[tauri::command]
@@ -252,8 +430,17 @@ fn resolve_data_dir() -> PathBuf {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_window_state::Builder::default().with_denylist(&["decide"]).build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        summon_decision(app);
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             let dir = resolve_data_dir();
             std::fs::create_dir_all(&dir)?;
@@ -277,6 +464,16 @@ pub fn run() {
             app.manage(DataDir(dir));
             app.manage(reminder::Reminder(Default::default()));
             reminder::spawn(app.handle().clone());
+            create_decide_window(app.handle())?;
+            // 快捷键可能被其他程序占用：注册失败不影响启动，只在设置页提示
+            let hk = with_conn(app.handle(), |c| {
+                Ok(db::get_settings(c)?.get("decideHotkey").and_then(|v| v.as_str().map(String::from)))
+            })
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| DEFAULT_HOTKEY.to_string());
+            let ok = register_hotkey(app.handle(), &hk);
+            app.manage(Hotkey(Mutex::new((hk, ok))));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -312,6 +509,14 @@ pub fn run() {
             play_chime,
             get_autostart,
             set_autostart,
+            range_stats,
+            decision_profile,
+            decide,
+            open_decide,
+            hotkey_status,
+            set_hotkey,
+            list_decisions,
+            set_decision_action,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

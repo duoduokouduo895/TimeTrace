@@ -180,6 +180,25 @@ fn migrate(conn: &Connection) -> Result<()> {
         tx.pragma_update(None, "user_version", 2)?;
         tx.commit()?;
     }
+    if version < 3 {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(
+            "CREATE TABLE decision (
+               id TEXT PRIMARY KEY,
+               asked_at INTEGER NOT NULL,
+               day TEXT NOT NULL,
+               question TEXT NOT NULL,
+               decision TEXT NOT NULL,      -- 'do' | 'dont'
+               p_do REAL,
+               confidence REAL,
+               action TEXT,                 -- 用户随后点了什么，如 '开始计时:面试学习'
+               updated_at INTEGER NOT NULL
+             );
+             CREATE INDEX idx_decision_day ON decision(day);",
+        )?;
+        tx.pragma_update(None, "user_version", 3)?;
+        tx.commit()?;
+    }
     Ok(())
 }
 
@@ -529,6 +548,117 @@ pub fn month_overview(conn: &Connection, month: &str) -> Result<Vec<DayStat>> {
     Ok(map.into_values().collect())
 }
 
+// ---------- range ----------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DayActivity {
+    pub day: String,
+    pub activity_id: String,
+    pub seconds: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RangeStats {
+    pub from: String,
+    pub to: String,
+    pub today: String,
+    pub activities: Vec<Activity>,
+    pub rows: Vec<DayActivity>,
+    pub reviewed: Vec<String>,
+}
+
+/// [from, to] 闭区间内按天、按项目的秒数，供趋势图使用
+pub fn range_stats(conn: &Connection, from: &str, to: &str) -> Result<RangeStats> {
+    let mut st = conn.prepare(
+        "SELECT day, activity_id, SUM(seconds) FROM entry
+         WHERE deleted=0 AND day BETWEEN ?1 AND ?2 GROUP BY day, activity_id ORDER BY day",
+    )?;
+    let rows = st
+        .query_map(params![from, to], |r| {
+            Ok(DayActivity { day: r.get(0)?, activity_id: r.get(1)?, seconds: r.get(2)? })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut st = conn.prepare(
+        "SELECT day FROM review WHERE day BETWEEN ?1 AND ?2
+         AND (best<>'' OR worst<>'' OR tomorrow<>'' OR score IS NOT NULL) ORDER BY day",
+    )?;
+    let reviewed = st.query_map(params![from, to], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    Ok(RangeStats {
+        from: from.into(),
+        to: to.into(),
+        today: day_of(now_ms()),
+        activities: list_activities(conn)?,
+        rows,
+        reviewed,
+    })
+}
+
+// ---------- decision ----------
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Decision {
+    pub id: String,
+    pub asked_at: i64,
+    pub question: String,
+    pub decision: String,
+    pub p_do: Option<f64>,
+    pub action: Option<String>,
+}
+
+pub fn insert_decision(
+    conn: &Connection,
+    question: &str,
+    decision: &str,
+    p_do: Option<f64>,
+    confidence: Option<f64>,
+) -> Result<Decision> {
+    let now = now_ms();
+    let d = Decision {
+        id: new_id(),
+        asked_at: now,
+        question: question.to_string(),
+        decision: decision.to_string(),
+        p_do,
+        action: None,
+    };
+    conn.execute(
+        "INSERT INTO decision(id,asked_at,day,question,decision,p_do,confidence,updated_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?2)",
+        params![d.id, now, day_of(now), question, decision, p_do, confidence],
+    )?;
+    Ok(d)
+}
+
+pub fn set_decision_action(conn: &Connection, id: &str, action: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE decision SET action=?2, updated_at=?3 WHERE id=?1",
+        params![id, action, now_ms()],
+    )?;
+    Ok(())
+}
+
+/// 最近的决策记录；day 为 Some 时只取该归属日
+pub fn list_decisions(conn: &Connection, day: Option<&str>, limit: i64) -> Result<Vec<Decision>> {
+    let mut st = conn.prepare(
+        "SELECT id,asked_at,question,decision,p_do,action FROM decision
+         WHERE (?1 IS NULL OR day=?1) ORDER BY asked_at DESC LIMIT ?2",
+    )?;
+    let rows = st.query_map(params![day, limit], |r| {
+        Ok(Decision {
+            id: r.get(0)?,
+            asked_at: r.get(1)?,
+            question: r.get(2)?,
+            decision: r.get(3)?,
+            p_do: r.get(4)?,
+            action: r.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 // ---------- summary ----------
 
 pub fn day_summary(conn: &Connection, day: Option<String>) -> Result<DaySummary> {
@@ -633,6 +763,26 @@ mod tests {
         move_activity(&conn, &id_of(&conn, "面试学习"), -1).unwrap();
         let names: Vec<_> = list_activities(&conn).unwrap().into_iter().map(|a| a.name).collect();
         assert_eq!(names, ["背单词", "面试学习", "英语跟读"]);
+    }
+
+    #[test]
+    fn range_and_decisions() {
+        let conn = mem();
+        let g = id_of(&conn, "背单词");
+        add_entry(&conn, &g, 600, None, Some("2026-01-02".into()), None, "manual").unwrap();
+        add_entry(&conn, &g, 300, None, Some("2026-01-02".into()), None, "manual").unwrap();
+        add_entry(&conn, &g, 60, None, Some("2026-02-01".into()), None, "manual").unwrap();
+        let r = range_stats(&conn, "2026-01-01", "2026-01-31").unwrap();
+        assert_eq!(r.rows.len(), 1);
+        assert_eq!(r.rows[0].seconds, 900);
+
+        let d = insert_decision(&conn, "打游戏", "dont", Some(0.1), Some(0.8)).unwrap();
+        insert_decision(&conn, "背单词", "do", Some(0.9), Some(0.8)).unwrap();
+        set_decision_action(&conn, &d.id, "开始计时:背单词").unwrap();
+        let list = list_decisions(&conn, Some(&day_of(now_ms())), 10).unwrap();
+        assert_eq!(list.len(), 2);
+        let refused = list.iter().find(|x| x.id == d.id).unwrap();
+        assert_eq!(refused.action.as_deref(), Some("开始计时:背单词"));
     }
 
     #[test]

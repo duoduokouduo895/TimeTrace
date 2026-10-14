@@ -21,11 +21,13 @@ import {
 import { Icon } from "./icons";
 import { Backdrop, SCALE_MAX, SCALE_MIN, prepareImage, useTheme } from "./theme";
 import { Bar } from "./Widget";
+import Trends from "./Trends";
+import DecisionPage from "./DecisionPage";
 
 const SOURCE_LABEL = { timer: "计时", manual: "手动", cli: "Codex" } as const;
 const WEEKDAY = "日一二三四五六";
 
-type Tab = "review" | "activities" | "appearance";
+type Tab = "review" | "trends" | "decision" | "activities" | "appearance";
 
 export default function Review() {
   const [day, setDay] = useState<string | undefined>(undefined);
@@ -47,6 +49,8 @@ export default function Review() {
                 {(
                   [
                     ["review", "复盘"],
+                    ["trends", "趋势"],
+                    ["decision", "决策"],
                     ["activities", "项目"],
                     ["appearance", "设置"],
                   ] as const
@@ -76,6 +80,8 @@ export default function Review() {
                 </Card>
               </>
             )}
+            {tab === "trends" && <Trends today={data.today} />}
+            {tab === "decision" && <DecisionPage />}
             {tab === "activities" && (
               <Card title="项目" hint="有益类设「每日目标」，消耗类设「每日上限」，0 表示不设。小组件上点「/1h」也能直接改。">
                 <Settings activities={data.activities} />

@@ -111,6 +111,9 @@ export default function Widget() {
               )}
             </div>
             <div className="w-tools">
+              <button className="icon" title="该不该做？让 Jev 决定" onClick={() => api.openDecide().catch(fail)}>
+                <Icon name="bolt" />
+              </button>
               <button className="icon" title="晚间复盘" onClick={() => api.openReview().catch(fail)}>
                 <Icon name="moon" />
               </button>
