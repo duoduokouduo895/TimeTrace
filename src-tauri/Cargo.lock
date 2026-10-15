@@ -3870,6 +3870,7 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-window-state",
+ "tokio",
  "uuid",
  "windows-sys 0.59.0",
 ]

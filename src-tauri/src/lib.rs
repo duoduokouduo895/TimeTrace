@@ -5,6 +5,7 @@ mod jev;
 #[cfg(mobile)]
 mod mobile;
 mod reminder;
+mod sync;
 
 // 平台差异集中在 desktop / mobile 两个模块，同名命令前端无需区分
 #[cfg(desktop)]
@@ -41,6 +42,7 @@ pub(crate) fn with_db<T>(state: &State<Db>, f: impl FnOnce(&Connection) -> anyho
 /// 写操作后通知所有窗口刷新
 fn mutate<T>(app: &AppHandle, state: &State<Db>, f: impl FnOnce(&Connection) -> anyhow::Result<T>) -> Res<T> {
     let out = with_db(state, f)?;
+    sync::mark_dirty(app);
     let _ = app.emit("data-changed", ());
     Ok(out)
 }
@@ -113,6 +115,9 @@ fn get_settings(state: State<Db>) -> Res<HashMap<String, serde_json::Value>> {
 #[tauri::command]
 fn set_setting(app: AppHandle, state: State<Db>, key: String, value: serde_json::Value) -> Res<()> {
     with_db(&state, |c| db::set_setting(c, &key, &value))?;
+    if key == "decisionProfile" {
+        sync::mark_dirty(&app);
+    }
     if key == "reminder" {
         reminder::reset(&app);
     }
@@ -257,6 +262,7 @@ async fn decide(app: AppHandle, question: String) -> Res<jev::Verdict> {
         let conn = state.0.lock().map_err(err)?;
         db::insert_decision(&conn, &question, kind, &ans.choice, ans.probability, ans.confidence).map_err(err)?
     };
+    sync::mark_dirty(&app);
     let _ = app.emit("decisions-changed", ());
     Ok(jev::Verdict { id: d.id, kind: kind.into(), answer: ans.choice })
 }
@@ -269,8 +275,60 @@ fn list_decisions(state: State<Db>, day: Option<String>, limit: i64) -> Res<Vec<
 #[tauri::command]
 fn set_decision_action(app: AppHandle, state: State<Db>, id: String, action: String) -> Res<()> {
     with_db(&state, |c| db::set_decision_action(c, &id, &action))?;
+    sync::mark_dirty(&app);
     let _ = app.emit("decisions-changed", ());
     Ok(())
+}
+
+// ---------- 同步 ----------
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncInfo {
+    enabled: bool,
+    url: String,
+    user: String,
+    has_password: bool,
+    state: sync::SyncState,
+}
+
+#[tauri::command]
+fn get_sync(state: State<Db>) -> Res<SyncInfo> {
+    with_db(&state, |c| {
+        let cfg = sync::config(c);
+        Ok(SyncInfo {
+            enabled: cfg.enabled,
+            url: if cfg.url.is_empty() { "https://dav.jianguoyun.com/dav/".into() } else { cfg.url },
+            user: cfg.user,
+            has_password: !cfg.password.is_empty(),
+            state: sync::state(c),
+        })
+    })
+}
+
+/// password 为空表示沿用已保存的密码；更换账号或地址会清空同步进度，重新完整同步一次
+#[tauri::command]
+fn set_sync_config(app: AppHandle, state: State<Db>, enabled: bool, url: String, user: String, password: String) -> Res<()> {
+    with_db(&state, |c| {
+        let old = sync::config(c);
+        let cfg = sync::SyncConfig {
+            enabled,
+            url: url.trim().to_string(),
+            user: user.trim().to_string(),
+            password: if password.is_empty() { old.password.clone() } else { password },
+        };
+        if cfg.url != old.url || cfg.user != old.user {
+            db::set_setting(c, "syncState", &serde_json::json!({}))?;
+        }
+        db::set_setting(c, "syncConfig", &serde_json::to_value(&cfg)?)
+    })?;
+    sync::mark_dirty(&app);
+    Ok(())
+}
+
+#[tauri::command]
+async fn sync_now(app: AppHandle) -> Res<sync::SyncReport> {
+    sync::sync_now(&app).await.map_err(err)
 }
 
 // ---------- 提醒 / 自启 ----------
@@ -313,6 +371,8 @@ pub fn run() {
             app.manage(Db(Mutex::new(conn)));
             app.manage(DataDir(dir));
             app.manage(reminder::Reminder(Default::default()));
+            app.manage(sync::SyncRuntime::default());
+            sync::spawn(handle.clone());
             platform::setup(handle)?;
             Ok(())
         })
@@ -344,6 +404,9 @@ pub fn run() {
             decide,
             list_decisions,
             set_decision_action,
+            get_sync,
+            set_sync_config,
+            sync_now,
             platform::set_pinned,
             platform::open_data_dir,
             platform::open_review,

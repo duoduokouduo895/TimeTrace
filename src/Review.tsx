@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   Activity,
+  SyncInfo,
   DEFAULT_REMINDER,
   DaySummary,
   ReminderConfig,
@@ -754,6 +756,8 @@ function Appearance() {
         </div>
       </Card>
 
+      <SyncCard />
+
       {/* 以下为电脑端专属：小组件缩放、提醒（手机端改用系统通知，后续实现）、打开数据目录 */}
       {!isMobile && (
       <>
@@ -783,6 +787,116 @@ function Appearance() {
       </>
       )}
     </>
+  );
+}
+
+/** 坚果云（WebDAV）同步：账号设置 + 状态 + 立即同步 */
+function SyncCard() {
+  const [info, setInfo] = useState<SyncInfo | null>(null);
+  const [form, setForm] = useState({ url: "", user: "", password: "" });
+  const [dirty, setDirty] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = (resetForm: boolean) =>
+    api.getSync().then((i) => {
+      setInfo(i);
+      if (resetForm) setForm({ url: i.url, user: i.user, password: "" });
+    });
+
+  useEffect(() => {
+    load(true);
+    const un = listen<{ state: string }>("sync-status", (e) => {
+      setSyncing(e.payload.state === "syncing");
+      if (e.payload.state !== "syncing") load(false);
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
+
+  if (!info) return null;
+
+  const edit = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setForm({ ...form, [k]: e.target.value });
+    setDirty(true);
+  };
+  const save = (enabled: boolean) =>
+    api.setSyncConfig({ enabled, ...form }).then(
+      () => {
+        setDirty(false);
+        setErr(null);
+        load(true);
+      },
+      (e) => setErr(String(e)),
+    );
+  const syncNow = () => {
+    setSyncing(true);
+    setErr(null);
+    api.syncNow().then(
+      () => load(false),
+      (e) => setErr(String(e)),
+    ).finally(() => setSyncing(false));
+  };
+
+  const st = info.state;
+  const peers = Object.values(st.peers ?? {});
+  const ready = info.user && info.hasPassword;
+
+  return (
+    <Card title="同步（坚果云）" hint="同步记录、复盘、项目设置、目标档案与准则；背景、主题与 API Key 各设备独立">
+      <div className="opt-list">
+        <div className="opt">
+          <span>启用自动同步</span>
+          <Switch on={info.enabled} disabled={!ready && !dirty} onChange={(v) => save(v)} />
+        </div>
+        <div className="sync-form">
+          <label>
+            <span>WebDAV 地址</span>
+            <input value={form.url} onChange={edit("url")} />
+          </label>
+          <label>
+            <span>坚果云账号</span>
+            <input value={form.user} placeholder="登录邮箱" autoComplete="off" onChange={edit("user")} />
+          </label>
+          <label>
+            <span>应用密码</span>
+            <input
+              type="password"
+              value={form.password}
+              autoComplete="off"
+              placeholder={info.hasPassword ? "已保存（不修改请留空）" : "不是登录密码，见下方说明"}
+              onChange={edit("password")}
+            />
+          </label>
+          <div className="row">
+            <button className="primary" disabled={!dirty} onClick={() => save(info.enabled || !info.user)}>
+              保存
+            </button>
+            <button className="ghost" disabled={!ready || syncing || dirty} onClick={syncNow}>
+              {syncing ? "同步中…" : "立即同步"}
+            </button>
+            <span className={`sync-status ${st.lastResult === "error" ? "bad" : ""}`}>
+              {st.lastSyncAt
+                ? `${new Date(st.lastSyncAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} · ${st.lastMessage ?? ""}`
+                : "还没同步过"}
+            </span>
+          </div>
+          {peers.length > 0 && <p className="muted small">已同步的其他设备：{peers.join("、")}</p>}
+        </div>
+      </div>
+      {err && <div className="r-err">{err}</div>}
+      <details className="help">
+        <summary>如何获取坚果云「应用密码」？</summary>
+        <ol>
+          <li>电脑浏览器登录 jianguoyun.com，右上角账户名 →「账户信息」→「安全选项」</li>
+          <li>在「第三方应用管理」里点「添加应用」，名称填 TimeTrace，生成密码</li>
+          <li>把生成的密码填到上面「应用密码」，账号填坚果云登录邮箱</li>
+          <li>电脑和手机都按同样的账号填写并启用，数据会自动合并</li>
+        </ol>
+        <p className="muted small">账号和应用密码只保存在本机，不会同步到其他设备。</p>
+      </details>
+    </Card>
   );
 }
 

@@ -23,6 +23,7 @@ chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 base64 = "0.22"
+tokio = { version = "1", features = ["time", "sync"] }
 
 # 仅桌面端：窗口状态、开机自启、全局快捷键
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
