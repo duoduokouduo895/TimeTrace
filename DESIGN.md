@@ -98,3 +98,13 @@ tt today            # 输出今日汇总（JSON，可供模型读取）
 3. 复盘提醒改为系统定时通知（手机进程会被回收，不能用后台线程）
 4. Kotlin 原生桌面小组件（时间条 + 点按开始/停止计时）
 5. `pnpm tauri android build` 打包 APK
+
+## 多设备同步（WebDAV，端到端加密）
+
+- 实现：`src-tauri/src/sync.rs`（同步流程）、`src-tauri/src/e2e.rs`（加密）
+- 远端 `TimeTrace/devices/<设备ID>.json`，每台设备只写自己的文件；读取他人文件逐条合并，`updated_at` 较新者胜，软删除随之同步；同名项目归并为 ID 较小者
+- 同步：记录、复盘、项目、决策记录、目标档案与准则；不同步：计时中状态、API Key、同步账号/口令、背景与设备专属设置
+- 加密：Argon2id(同步口令, 盐) → XChaCha20-Poly1305，附加数据绑定文件名；云端只有密文。口令只存本机，所有设备须一致
+- 流程：先拉取并解密其他设备（解不开的跳过并提示），再上传；本机口令一个都解不开时不上传，避免污染云端
+- 节流：内容不变不上传（明文指纹）、对方 ETag 不变不下载；空闲时每 10 分钟 1 个 PROPFIND
+- 端到端测试：`cargo test --lib webdav_round_trip -- --ignored`（需本地 WebDAV 模拟服务器）

@@ -1,6 +1,6 @@
 [package]
 name = "timetrace"
-version = "0.4.0"
+version = "0.4.1"
 description = "每日时间记录 + 晚间复盘"
 authors = ["armstrong"]
 edition = "2024"
@@ -24,6 +24,10 @@ uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 base64 = "0.22"
 tokio = { version = "1", features = ["time", "sync"] }
+# 同步端到端加密：口令派生密钥 + 认证加密
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+getrandom = "0.2"
 
 # 仅桌面端：窗口状态、开机自启、全局快捷键
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

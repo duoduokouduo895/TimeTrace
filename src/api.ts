@@ -93,6 +93,7 @@ export interface SyncInfo {
   url: string;
   user: string;
   hasPassword: boolean;
+  hasPassphrase: boolean;
   state: {
     lastSyncAt: number | null;
     lastResult: "ok" | "error" | null;
@@ -130,7 +131,7 @@ export const api = {
   listDecisions: (limit: number, day?: string) => invoke<DecisionRecord[]>("list_decisions", { day, limit }),
   setDecisionAction: (id: string, action: string) => invoke<void>("set_decision_action", { id, action }),
   getSync: () => invoke<SyncInfo>("get_sync"),
-  setSyncConfig: (c: { enabled: boolean; url: string; user: string; password: string }) =>
+  setSyncConfig: (c: { enabled: boolean; url: string; user: string; password: string; passphrase: string }) =>
     invoke<void>("set_sync_config", c),
   syncNow: () => invoke<{ uploaded: boolean; pulledDevices: number; changedRows: number }>("sync_now"),
   reminderPending: () => invoke<boolean>("reminder_pending"),

@@ -2060,3 +2060,10 @@ details.help ol {
   grid-template-columns: 1fr;
   gap: 4px;
 }
+.sync-note {
+  margin: -2px 0 2px;
+  line-height: 1.7;
+}
+.sync-note b {
+  color: var(--text-2);
+}

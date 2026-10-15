@@ -4,7 +4,9 @@
 //! 读取其他设备的文件后逐条合并：同一主键取 updated_at 较新者（删除是软删除标记，同样随之同步）。
 //! 两台设备首次启动各自生成的同名默认项目，合并后按名称归并为 ID 较小的那个。
 //!
-//! 不同步：正在进行的计时、API Key、同步账号、背景图与设备专属设置。
+//! 不同步：正在进行的计时、API Key、同步账号与口令、背景图与设备专属设置。
+//!
+//! 云端文件经端到端加密（见 e2e.rs）：服务商只能看到密文。
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
@@ -20,6 +22,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::Db;
 use crate::db::{self, now_ms};
+use crate::e2e;
 
 const FORMAT: i64 = 1;
 const REMOTE_DIR: &str = "TimeTrace";
@@ -189,6 +192,8 @@ pub struct SyncConfig {
     pub url: String,
     pub user: String,
     pub password: String,
+    /// 端到端加密口令，所有设备一致；只存本机
+    pub passphrase: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -203,6 +208,8 @@ pub struct SyncState {
     /// 其他设备文件名 -> ETag，未变化就不下载
     pub etags: HashMap<String, String>,
     pub dirs_ready: bool,
+    /// 本机加密用的盐（随密文上传，非机密）
+    pub salt: Option<String>,
     /// 其他设备：文件名 -> 设备名
     pub peers: HashMap<String, String>,
 }
@@ -446,6 +453,8 @@ pub struct SyncReport {
     pub uploaded: bool,
     pub pulled_devices: usize,
     pub changed_rows: usize,
+    /// 口令不一致、解不开而跳过的设备数
+    pub skipped_devices: usize,
 }
 
 /// 完整同步一次：上传本机快照 → 下载其他设备的变化并合并 → 若合并后有变化再上传
@@ -460,6 +469,10 @@ pub async fn sync_now(app: &AppHandle) -> Result<SyncReport> {
         *t = Some(Instant::now());
     }
     let (res, msg) = match &result {
+        Ok(r) if r.skipped_devices > 0 => (
+            "error",
+            format!("有 {} 台设备的同步口令与本机不一致，已跳过；其余已同步", r.skipped_devices),
+        ),
         Ok(r) if r.changed_rows > 0 => ("ok", format!("已合并 {} 条变更", r.changed_rows)),
         Ok(_) => ("ok", "已是最新".to_string()),
         Err(e) => ("error", e.to_string()),
@@ -485,6 +498,12 @@ async fn run(db: &Mutex<Connection>) -> Result<SyncReport> {
     if cfg.user.trim().is_empty() || cfg.password.is_empty() {
         bail!("还没填写坚果云账号和应用密码");
     }
+    if cfg.passphrase.is_empty() {
+        bail!("还没设置同步口令（用于端到端加密）");
+    }
+    if st.salt.is_none() {
+        st.salt = Some(e2e::random_salt()?);
+    }
     let dav = Dav::new(&cfg)?;
     if !st.dirs_ready {
         dav.mkcol("").await.context("创建 TimeTrace 目录")?;
@@ -492,19 +511,32 @@ async fn run(db: &Mutex<Connection>) -> Result<SyncReport> {
         st.dirs_ready = true;
     }
     let my_file = format!("{my_id}.json");
-    let mut report = SyncReport { uploaded: false, pulled_devices: 0, changed_rows: 0 };
+    let mut report = SyncReport { uploaded: false, pulled_devices: 0, changed_rows: 0, skipped_devices: 0 };
 
-    upload_if_changed(db, &dav, &mut st, &my_id, &my_file, &mut report).await?;
-
-    // 拉取其他设备
+    // 先拉取并校验其他设备，再上传：口令填错的设备不会把错误口令加密的文件传上去
     let files = dav.list("devices/").await?;
+    let mut verified = 0;
     for (name, etag) in files.into_iter().filter(|(n, _)| *n != my_file) {
+        // ETag 未变：上次已成功解开过
         if !etag.is_empty() && st.etags.get(&name) == Some(&etag) {
+            verified += 1;
             continue;
         }
         let known = st.etags.get(&name).map(String::as_str);
-        let Some((body, new_etag)) = dav.get(&format!("devices/{name}"), known).await? else { continue };
-        let snap: Snapshot = serde_json::from_str(&body).with_context(|| format!("解析 {name}"))?;
+        let Some((body, new_etag)) = dav.get(&format!("devices/{name}"), known).await? else {
+            verified += 1;
+            continue;
+        };
+        let plain = match e2e::decrypt(&body, &cfg.passphrase, &name) {
+            Ok(p) => p,
+            // 解不开：跳过这台设备，其余照常同步（不记 ETag，口令改对后会重试）
+            Err(_) => {
+                report.skipped_devices += 1;
+                continue;
+            }
+        };
+        verified += 1;
+        let snap: Snapshot = serde_json::from_str(&plain).with_context(|| format!("解析 {name}"))?;
         let changed = locked(db, |c| {
             let n = merge(c, &snap)?;
             Ok(n + if n > 0 { dedupe_activities(c)? } else { 0 })
@@ -515,10 +547,12 @@ async fn run(db: &Mutex<Connection>) -> Result<SyncReport> {
         st.etags.insert(name, new_etag.unwrap_or(etag));
     }
 
-    // 合并带来了变化（含归并项目）→ 本机快照也变了，立即再上传一次，让对方尽快一致
-    if report.changed_rows > 0 {
-        upload_if_changed(db, &dav, &mut st, &my_id, &my_file, &mut report).await?;
+    // 云端已有设备、本机却一个都解不开：多半是本机口令填错，不上传，避免污染云端
+    if report.skipped_devices > 0 && verified == 0 {
+        locked(db, |c| save_state(c, &st))?;
+        bail!("同步口令和云端其他设备不一致，请检查后重新填写（本次未上传）");
     }
+    upload_if_changed(db, &dav, &cfg, &mut st, &my_id, &my_file, &mut report).await?;
     locked(db, |c| save_state(c, &st))?;
     Ok(report)
 }
@@ -526,15 +560,19 @@ async fn run(db: &Mutex<Connection>) -> Result<SyncReport> {
 async fn upload_if_changed(
     db: &Mutex<Connection>,
     dav: &Dav,
+    cfg: &SyncConfig,
     st: &mut SyncState,
     my_id: &str,
     my_file: &str,
     report: &mut SyncReport,
 ) -> Result<()> {
     let body = locked(db, |c| Ok(serde_json::to_string(&export(c, my_id, device_name())?)?))?;
+    // 指纹按明文算（密文每次都不同）；换口令时同步进度会被清空，从而重新上传
     let fp = fingerprint(&body);
     if st.upload_hash.as_deref() != Some(fp.as_str()) {
-        dav.put(&format!("devices/{my_file}"), body).await?;
+        let salt = st.salt.clone().ok_or_else(|| anyhow!("缺少加密盐"))?;
+        let sealed = e2e::encrypt(&body, &cfg.passphrase, &salt, my_file)?;
+        dav.put(&format!("devices/{my_file}"), sealed).await?;
         st.upload_hash = Some(fp);
         report.uploaded = true;
     }
@@ -654,7 +692,7 @@ mod tests {
     #[test]
     #[ignore]
     fn webdav_round_trip() {
-        let cfg = json!({ "enabled": true, "url": "http://127.0.0.1:18080/dav", "user": "u@x.com", "password": "apppass" });
+        let cfg = json!({ "enabled": true, "url": "http://127.0.0.1:18080/dav", "user": "u@x.com", "password": "apppass", "passphrase": "同一个口令" });
         let (a, b) = (Mutex::new(device()), Mutex::new(device()));
         for d in [&a, &b] {
             db::set_setting(&d.lock().unwrap(), "syncConfig", &cfg).unwrap();
@@ -683,10 +721,23 @@ mod tests {
         assert_eq!(summary_ids(&ca, "activity"), summary_ids(&cb, "activity"));
         assert_eq!(summary_ids(&ca, "entry").len(), 2);
 
-        // 账号错误时给出清楚的提示
+        // 口令不一致的设备：解不开别人的数据，给出明确提示
         drop((ca, cb));
+        let other = Mutex::new(device());
+        let mut cfg2 = cfg.clone();
+        cfg2["passphrase"] = json!("另一个口令");
+        db::set_setting(&other.lock().unwrap(), "syncConfig", &cfg2).unwrap();
+        let e = format!("{:#}", rt(run(&other)).unwrap_err());
+        println!("wrong passphrase -> {e}");
+        assert!(e.contains("同步口令") && e.contains("未上传"));
+        // 错误口令的设备没有上传，正确的设备不受影响
+        let r6 = rt(run(&a)).unwrap();
+        println!("after wrong device: skipped={} uploaded={}", r6.skipped_devices, r6.uploaded);
+        assert_eq!(r6.skipped_devices, 0);
+
+        // 账号错误时给出清楚的提示
         let bad = Mutex::new(device());
-        db::set_setting(&bad.lock().unwrap(), "syncConfig", &json!({ "url": "http://127.0.0.1:18080/dav", "user": "u@x.com", "password": "wrong" })).unwrap();
+        db::set_setting(&bad.lock().unwrap(), "syncConfig", &json!({ "url": "http://127.0.0.1:18080/dav", "user": "u@x.com", "password": "wrong", "passphrase": "x" })).unwrap();
         let e = format!("{:#}", rt(run(&bad)).unwrap_err());
         println!("bad password -> {e}");
         assert!(e.contains("401"));

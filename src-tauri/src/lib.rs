@@ -1,6 +1,7 @@
 mod db;
 #[cfg(desktop)]
 mod desktop;
+mod e2e;
 mod jev;
 #[cfg(mobile)]
 mod mobile;
@@ -289,6 +290,7 @@ struct SyncInfo {
     url: String,
     user: String,
     has_password: bool,
+    has_passphrase: bool,
     state: sync::SyncState,
 }
 
@@ -301,14 +303,24 @@ fn get_sync(state: State<Db>) -> Res<SyncInfo> {
             url: if cfg.url.is_empty() { "https://dav.jianguoyun.com/dav/".into() } else { cfg.url },
             user: cfg.user,
             has_password: !cfg.password.is_empty(),
+            has_passphrase: !cfg.passphrase.is_empty(),
             state: sync::state(c),
         })
     })
 }
 
-/// password 为空表示沿用已保存的密码；更换账号或地址会清空同步进度，重新完整同步一次
+/// password / passphrase 为空表示沿用已保存的值；
+/// 更换账号、地址或口令会清空同步进度，重新完整同步一次（换口令后会用新口令重新加密上传）
 #[tauri::command]
-fn set_sync_config(app: AppHandle, state: State<Db>, enabled: bool, url: String, user: String, password: String) -> Res<()> {
+fn set_sync_config(
+    app: AppHandle,
+    state: State<Db>,
+    enabled: bool,
+    url: String,
+    user: String,
+    password: String,
+    passphrase: String,
+) -> Res<()> {
     with_db(&state, |c| {
         let old = sync::config(c);
         let cfg = sync::SyncConfig {
@@ -316,8 +328,9 @@ fn set_sync_config(app: AppHandle, state: State<Db>, enabled: bool, url: String,
             url: url.trim().to_string(),
             user: user.trim().to_string(),
             password: if password.is_empty() { old.password.clone() } else { password },
+            passphrase: if passphrase.is_empty() { old.passphrase.clone() } else { passphrase },
         };
-        if cfg.url != old.url || cfg.user != old.user {
+        if cfg.url != old.url || cfg.user != old.user || cfg.passphrase != old.passphrase {
             db::set_setting(c, "syncState", &serde_json::json!({}))?;
         }
         db::set_setting(c, "syncConfig", &serde_json::to_value(&cfg)?)

@@ -793,7 +793,7 @@ function Appearance() {
 /** 坚果云（WebDAV）同步：账号设置 + 状态 + 立即同步 */
 function SyncCard() {
   const [info, setInfo] = useState<SyncInfo | null>(null);
-  const [form, setForm] = useState({ url: "", user: "", password: "" });
+  const [form, setForm] = useState({ url: "", user: "", password: "", passphrase: "" });
   const [dirty, setDirty] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -801,7 +801,7 @@ function SyncCard() {
   const load = (resetForm: boolean) =>
     api.getSync().then((i) => {
       setInfo(i);
-      if (resetForm) setForm({ url: i.url, user: i.user, password: "" });
+      if (resetForm) setForm({ url: i.url, user: i.user, password: "", passphrase: "" });
     });
 
   useEffect(() => {
@@ -841,10 +841,10 @@ function SyncCard() {
 
   const st = info.state;
   const peers = Object.values(st.peers ?? {});
-  const ready = info.user && info.hasPassword;
+  const ready = info.user && info.hasPassword && info.hasPassphrase;
 
   return (
-    <Card title="同步（坚果云）" hint="同步记录、复盘、项目设置、目标档案与准则；背景、主题与 API Key 各设备独立">
+    <Card title="同步（坚果云）" hint="端到端加密：云端只存密文，坚果云看不到内容">
       <div className="opt-list">
         <div className="opt">
           <span>启用自动同步</span>
@@ -869,6 +869,20 @@ function SyncCard() {
               onChange={edit("password")}
             />
           </label>
+          <label>
+            <span>同步口令</span>
+            <input
+              type="password"
+              value={form.passphrase}
+              autoComplete="new-password"
+              placeholder={info.hasPassphrase ? "已设置（不修改请留空）" : "自己设一个，所有设备填同一个"}
+              onChange={edit("passphrase")}
+            />
+          </label>
+          <p className="muted small sync-note">
+            同步口令用来在本机加密数据，只保存在本机、不会上传。<b>所有设备必须一致；忘记后云端数据无法解开</b>
+            （各设备本地数据不受影响，重设口令后会重新加密上传）。
+          </p>
           <div className="row">
             <button className="primary" disabled={!dirty} onClick={() => save(info.enabled || !info.user)}>
               保存
@@ -892,9 +906,11 @@ function SyncCard() {
           <li>电脑浏览器登录 jianguoyun.com，右上角账户名 →「账户信息」→「安全选项」</li>
           <li>在「第三方应用管理」里点「添加应用」，名称填 TimeTrace，生成密码</li>
           <li>把生成的密码填到上面「应用密码」，账号填坚果云登录邮箱</li>
-          <li>电脑和手机都按同样的账号填写并启用，数据会自动合并</li>
+          <li>电脑和手机都填同样的账号、应用密码和<b>同步口令</b>并启用，数据会自动合并</li>
         </ol>
-        <p className="muted small">账号和应用密码只保存在本机，不会同步到其他设备。</p>
+        <p className="muted small">
+          同步内容：记录、复盘、项目设置、目标档案与准则；背景、主题、API Key 各设备独立。账号、应用密码与同步口令只保存在本机。
+        </p>
       </details>
     </Card>
   );
