@@ -1,3 +1,6 @@
+// 手机端暂未接入提醒线程（后续改用系统定时通知），先忽略未使用告警
+#![cfg_attr(mobile, allow(dead_code))]
+
 //! 晚间复盘提醒：后台线程定时检查，到点且当天未复盘时
 //! 恢复小组件窗口、播放提示音，并通知前端弹出提醒横幅。
 
@@ -102,6 +105,8 @@ fn tick(app: &AppHandle) -> anyhow::Result<()> {
 }
 
 fn fire(app: &AppHandle, sound: bool) {
+    // 恢复被最小化的小组件（手机上没有窗口最小化）
+    #[cfg(desktop)]
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.unminimize();
         let _ = w.show();

@@ -1,6 +1,6 @@
 [package]
 name = "timetrace"
-version = "0.3.1"
+version = "0.4.0"
 description = "每日时间记录 + 晚间复盘"
 authors = ["armstrong"]
 edition = "2024"
@@ -15,9 +15,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-window-state = "2"
-tauri-plugin-autostart = "2"
-tauri-plugin-global-shortcut = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -26,6 +23,12 @@ chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 base64 = "0.22"
+
+# 仅桌面端：窗口状态、开机自启、全局快捷键
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-window-state = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-global-shortcut = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Media_Audio"] }

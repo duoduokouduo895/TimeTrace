@@ -23,28 +23,38 @@ import { Backdrop, SCALE_MAX, SCALE_MIN, prepareImage, useTheme } from "./theme"
 import { Bar } from "./Widget";
 import Trends from "./Trends";
 import DecisionPage from "./DecisionPage";
+import { isMobile } from "./platform";
 
 const SOURCE_LABEL = { timer: "计时", manual: "手动", cli: "Codex" } as const;
 const WEEKDAY = "日一二三四五六";
 
 type Tab = "review" | "trends" | "decision" | "activities" | "appearance";
+/** 手机上由底部标签栏决定显示哪一块；settings = 项目 + 设置 */
+export type Section = "review" | "trends" | "decision" | "settings";
 
-export default function Review() {
+export default function Review({ section }: { section?: Section }) {
   const [day, setDay] = useState<string | undefined>(undefined);
   const { data, error } = useDaySummary(day);
   const now = useNow(!!data?.running);
-  const [tab, setTab] = useState<Tab>("review");
+  const [localTab, setTab] = useState<Tab>("review");
+  const embedded = section !== undefined;
+  const tab: Tab | "settings" = section ?? localTab;
 
   return (
     <>
-      <Backdrop extraBlur={14} />
+      {!embedded && <Backdrop extraBlur={14} />}
       <div className="r-page">
         {!data ? (
           <div className="muted">{error ?? "加载中…"}</div>
         ) : (
           <>
             <header className="r-head">
-              <DateNav data={data} onPick={(d) => setDay(d === data.today ? undefined : d)} />
+              {(!embedded || tab === "review") && (
+                <DateNav data={data} onPick={(d) => setDay(d === data.today ? undefined : d)} />
+              )}
+              {embedded ? (
+                tab !== "review" && <h1 className="m-title">{{ trends: "趋势", decision: "决策", settings: "设置" }[tab as string]}</h1>
+              ) : (
               <nav className="seg">
                 {(
                   [
@@ -60,6 +70,7 @@ export default function Review() {
                   </button>
                 ))}
               </nav>
+              )}
             </header>
             {error && <div className="r-err">{error}</div>}
 
@@ -88,6 +99,14 @@ export default function Review() {
               </Card>
             )}
             {tab === "appearance" && <Appearance />}
+            {tab === "settings" && (
+              <>
+                <Card title="项目" hint="有益类设每日目标，消耗类设每日上限，0 表示不设">
+                  <Settings activities={data.activities} />
+                </Card>
+                <Appearance />
+              </>
+            )}
           </>
         )}
       </div>
@@ -735,6 +754,9 @@ function Appearance() {
         </div>
       </Card>
 
+      {/* 以下为电脑端专属：小组件缩放、提醒（手机端改用系统通知，后续实现）、打开数据目录 */}
+      {!isMobile && (
+      <>
       <Card title="小组件缩放" hint="在小组件上按住 Ctrl 滚动滚轮也能缩放">
         <div className="row">
           {[0.85, 1, 1.15, 1.3].map((s) => (
@@ -758,6 +780,8 @@ function Appearance() {
         </div>
         <p className="muted small">timetrace.db 是全部记录，theme/ 下是背景图。备份时复制整个文件夹即可。</p>
       </Card>
+      </>
+      )}
     </>
   );
 }

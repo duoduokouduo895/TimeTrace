@@ -215,6 +215,7 @@ fn migrate(conn: &Connection) -> Result<()> {
 }
 
 /// 把旧位置的数据库完整拷贝到新位置（旧文件保留不动）
+#[cfg_attr(mobile, allow(dead_code))] // 仅桌面端使用
 pub fn copy_db(from: &Path, to: &Path) -> Result<()> {
     let old = Connection::open(from)?;
     old.execute("VACUUM INTO ?1", params![to.to_string_lossy()])?;
@@ -503,6 +504,7 @@ fn get_review(conn: &Connection, day: &str) -> Result<Review> {
 }
 
 /// 该日是否已写过复盘（任一字段非空即算）
+#[cfg_attr(mobile, allow(dead_code))] // 仅桌面端使用
 pub fn has_review(conn: &Connection, day: &str) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM review WHERE day=?1

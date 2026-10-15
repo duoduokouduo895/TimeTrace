@@ -203,7 +203,7 @@ export default function Widget() {
   );
 }
 
-function Row(props: {
+export function Row(props: {
   a: Activity;
   data: DaySummary;
   now: number;

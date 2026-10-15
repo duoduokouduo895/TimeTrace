@@ -1738,3 +1738,285 @@ textarea.profile {
 .hotkey-row {
   margin: 4px 0 12px;
 }
+
+/* ---------- 手机端 ---------- */
+.page-mobile {
+  font-size: 14px;
+  -webkit-tap-highlight-color: transparent;
+}
+.m-main {
+  position: relative;
+  z-index: 1;
+  padding: calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 92px);
+}
+.m-nav {
+  position: fixed;
+  z-index: 10;
+  left: 10px;
+  right: 10px;
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+  display: flex;
+  padding: 6px;
+  border-radius: 22px;
+  background: var(--glass-strong);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(24px) saturate(1.3);
+  box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.7);
+}
+.m-nav button {
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0 5px;
+  border: none;
+  border-radius: 16px;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+.m-nav button.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.m-fab {
+  position: fixed;
+  z-index: 9;
+  right: 18px;
+  bottom: calc(env(safe-area-inset-bottom) + 88px);
+  padding: 12px 18px;
+  border: none;
+  border-radius: 99px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  box-shadow: 0 10px 24px -8px var(--accent);
+}
+.m-title {
+  font-size: 22px;
+  margin: 4px 0 0;
+}
+.m-today-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin: 6px 4px 14px;
+}
+.m-today-head h1 {
+  font-size: 26px;
+  margin: 0 8px 0 0;
+  display: inline;
+}
+.m-sums {
+  display: flex;
+  gap: 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.m-sums b {
+  margin-left: 4px;
+  font-size: 15px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.m-sums b.gain {
+  color: var(--good);
+}
+.m-live {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.m-live b {
+  margin-left: auto;
+  font-size: 18px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.m-list {
+  padding: 8px 6px;
+  margin-top: 0;
+}
+.m-hint {
+  text-align: center;
+  margin: 12px 0 0;
+}
+/* 触屏：放大行与按钮，「＋」常显（没有悬停） */
+.page-mobile .w-row {
+  padding: 12px 10px 13px;
+}
+.page-mobile .w-line {
+  height: 28px;
+  margin-bottom: 9px;
+}
+.page-mobile .w-name {
+  font-size: 15px;
+}
+.page-mobile .w-val b {
+  font-size: 15px;
+}
+.page-mobile .w-actions .icon {
+  padding: 8px;
+}
+.page-mobile .w-row:not(:hover) .w-actions .icon:not(.on):last-child {
+  opacity: 1;
+}
+.page-mobile .bar {
+  height: 8px;
+}
+.page-mobile .w-add input {
+  font-size: 14px;
+  padding: 8px 10px;
+}
+
+/* 复盘、趋势、设置在窄屏上的排布 */
+.page-mobile .r-page {
+  padding: 0;
+}
+.page-mobile .r-head {
+  margin-bottom: 4px;
+}
+.page-mobile .card {
+  padding: 14px 14px 16px;
+  border-radius: 18px;
+}
+.page-mobile .card h2 {
+  flex-wrap: wrap;
+}
+.page-mobile .stats {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.page-mobile .stat {
+  padding: 12px 14px;
+}
+.page-mobile .stat-v {
+  font-size: 22px;
+}
+.page-mobile .cal {
+  left: 0;
+}
+.page-mobile .cmp-h {
+  display: none;
+}
+.page-mobile .cmp-row {
+  grid-template-columns: 1fr auto auto;
+}
+/* 只保留：项目、今日、较均值 */
+.page-mobile .cmp-row > :nth-child(2),
+.page-mobile .cmp-row > :nth-child(4),
+.page-mobile .cmp-row > :nth-child(5) {
+  display: none;
+}
+.page-mobile .entries li {
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.page-mobile .e-note {
+  flex-basis: 100%;
+  order: 9;
+}
+.page-mobile .rf-grid {
+  grid-template-columns: 1fr;
+}
+.page-mobile .mrow {
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.page-mobile .trend-bar {
+  gap: 10px;
+}
+.page-mobile .appear {
+  flex-direction: column;
+}
+.page-mobile .preview {
+  width: 100%;
+}
+.page-mobile .slider > span:first-child {
+  width: 84px;
+}
+.page-mobile .dlog-time {
+  width: 72px;
+}
+
+/* 手机上的「做不做」浮层 */
+.dw-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(4, 6, 14, 0.5);
+  backdrop-filter: blur(6px);
+  animation: fade-in 0.2s ease-out;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.dw-overlay .dw-stage {
+  padding: 0 16px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.dw-overlay .dw-card {
+  width: min(480px, 100%);
+}
+.dw-overlay .dw-tips {
+  margin-left: 0;
+  flex-wrap: wrap;
+}
+.dw-go {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  color: #fff;
+  background: var(--accent);
+}
+/* 触屏点过的按钮会「粘住」悬停态，看起来像被选中：手机上去掉悬停效果 */
+.page-mobile .m-nav button:not(.on):hover {
+  background: none;
+  color: var(--muted);
+}
+.page-mobile button.icon:hover {
+  background: none;
+}
+
+/* 浮层居中改用 flex：grid 的 auto 列会按卡片 480px 撑开，窄屏右侧被裁掉 */
+.dw-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dw-overlay .dw-stage {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+/* 打分行：保存按钮不换行；手机上整行放不下时按钮独占一行 */
+.score .primary {
+  flex: none;
+  white-space: nowrap;
+}
+.page-mobile .score {
+  flex-wrap: wrap;
+  row-gap: 12px;
+}
+.page-mobile .score .spacer {
+  display: none;
+}
+.page-mobile .score .primary {
+  width: 100%;
+  justify-content: center;
+  padding: 9px 12px;
+}

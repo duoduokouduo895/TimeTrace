@@ -67,6 +67,7 @@ export interface DecisionProfile {
   defaultGoals: string;
   defaultRules: string;
   hasKey: boolean;
+  keySource: "env" | "app" | null;
 }
 
 export interface Verdict {
@@ -108,6 +109,7 @@ export const api = {
   openDataDir: () => invoke<void>("open_data_dir"),
   rangeStats: (from: string, to: string) => invoke<RangeStats>("range_stats", { from, to }),
   decisionProfile: () => invoke<DecisionProfile>("decision_profile"),
+  setApiKey: (key: string) => invoke<void>("set_api_key", { key }),
   openDecide: () => invoke<void>("open_decide"),
   hotkeyStatus: () => invoke<{ hotkey: string; ok: boolean }>("hotkey_status"),
   setHotkey: (hotkey: string) => invoke<{ hotkey: string; ok: boolean }>("set_hotkey", { hotkey }),

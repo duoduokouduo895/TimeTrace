@@ -83,3 +83,18 @@ tt today            # 输出今日汇总（JSON，可供模型读取）
 3. 周趋势、复盘提醒
 4. 防拖延决策助手（Jev）
 5. Android 端 + 同步
+
+## Android 端（进行中）
+
+已定方向：App + 原生桌面小组件；手机单独存数据（以后再做同步）；全部手动记录，不做自动统计。
+
+已完成（第 1 步，跨平台改造，尚未在真机编译）：
+- Rust：平台差异集中在 `src-tauri/src/desktop.rs` / `mobile.rs`，`lib.rs` 通过 `platform::` 调用同名命令；桌面专用插件（window-state / autostart / global-shortcut）已移到 `cfg(not(android/ios))` 依赖
+- 手机数据目录：`app_data_dir()`；Jev API Key 在手机上于「决策」页填写（存 `setting.jevApiKey`），电脑仍优先读 `TYPESAFE_API_KEY`
+- 前端：`src/platform.ts` 的 `isMobile`（按 UA 判断）→ `src/MobileApp.tsx`（底部标签：今日/复盘/趋势/决策/设置，「做不做」为浮层）；`Review` 支持 `section` 属性嵌入
+
+待做：
+2. 生成工程并真机运行：设好 `NDK_HOME`、`rustup target add aarch64-linux-android`，手机开 USB 调试，然后 `pnpm tauri android init`、`pnpm tauri android dev`
+3. 复盘提醒改为系统定时通知（手机进程会被回收，不能用后台线程）
+4. Kotlin 原生桌面小组件（时间条 + 点按开始/停止计时）
+5. `pnpm tauri android build` 打包 APK

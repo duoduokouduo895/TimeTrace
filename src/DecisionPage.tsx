@@ -2,6 +2,50 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { DecisionProfile, DecisionRecord, api, fmtTime } from "./api";
 import { Icon } from "./icons";
+import { isMobile } from "./platform";
+
+/** Jev API Key：电脑上优先用环境变量 TYPESAFE_API_KEY；手机上只能在这里填写，保存在本机数据库 */
+function KeyRow({ p, onSaved }: { p: DecisionProfile; onSaved: () => void }) {
+  const [key, setKey] = useState("");
+  const [editing, setEditing] = useState(!p.hasKey);
+  if (p.keySource === "env") return null;
+  if (!editing)
+    return (
+      <div className="row hotkey-row">
+        <span>Jev API Key</span>
+        <span className="key-pill ok">已保存在本机</span>
+        <button className="ghost small" onClick={() => setEditing(true)}>
+          更换
+        </button>
+      </div>
+    );
+  return (
+    <div className="row hotkey-row">
+      <span>Jev API Key</span>
+      <input
+        className="w-l"
+        type="password"
+        autoComplete="off"
+        placeholder="在 console.typesafe.ai/keys 创建后粘贴到这里"
+        value={key}
+        onChange={(e) => setKey(e.target.value)}
+      />
+      <button
+        className="primary small"
+        disabled={!key.trim()}
+        onClick={() =>
+          api.setApiKey(key).then(() => {
+            setKey("");
+            setEditing(false);
+            onSaved();
+          })
+        }
+      >
+        保存
+      </button>
+    </div>
+  );
+}
 
 /** 复盘页「决策」：用法、个人目标档案、判断准则、最近的决策 */
 const HOTKEYS = ["ctrl+alt+d", "ctrl+alt+j", "ctrl+alt+space", "ctrl+shift+space", "alt+shift+d"];
@@ -49,12 +93,17 @@ export default function DecisionPage() {
   const [saved, setSaved] = useState(true);
   const [log, setLog] = useState<DecisionRecord[]>([]);
 
-  useEffect(() => {
+  const loadProfile = (withText: boolean) =>
     api.decisionProfile().then((d) => {
       setP(d);
-      setGoals(d.goals);
-      setRules(d.rules);
+      if (withText) {
+        setGoals(d.goals);
+        setRules(d.rules);
+      }
     });
+
+  useEffect(() => {
+    loadProfile(true);
     const load = () => api.listDecisions(30).then(setLog);
     load();
     const un = listen("decisions-changed", load);
@@ -79,13 +128,21 @@ export default function DecisionPage() {
         <h2>
           怎么用
           <span className={`key-pill ${p.hasKey ? "ok" : "bad"}`}>
-            {p.hasKey ? "已检测到 API Key" : "未检测到 TYPESAFE_API_KEY"}
+            {p.hasKey ? "API Key 已就绪" : "还没有 API Key"}
           </span>
         </h2>
         <ol className="howto">
           <li>
-            想摸鱼、犹豫要不要做某件事时，按下面设置的快捷键（或点小组件上的
-            <Icon name="bolt" size={12} />），屏幕中央会弹出输入框
+            {isMobile ? (
+              <>
+                想摸鱼、犹豫要不要做某件事时，点「今日」页右下角的 <Icon name="bolt" size={12} /> 做不做
+              </>
+            ) : (
+              <>
+                想摸鱼、犹豫要不要做某件事时，按下面设置的快捷键（或点小组件上的
+                <Icon name="bolt" size={12} />），屏幕中央会弹出输入框
+              </>
+            )}
           </li>
           <li>
             写一件事，比如「刷视频」→ Jev 只回答 <b className="good">做</b> 或 <b className="bad">不做</b>
@@ -94,9 +151,10 @@ export default function DecisionPage() {
             写几个选项，用「与 / 还是 / 或者 / 、」隔开，比如「睡觉与学习」→ Jev 直接回答其中一个，比如
             <b className="accent-text">学习</b>
           </li>
-          <li>不给理由，看完按 Enter 或 Esc 关掉，立刻去做</li>
+          <li>{isMobile ? "不给理由，轻点关掉，立刻去做" : "不给理由，看完按 Enter 或 Esc 关掉，立刻去做"}</li>
         </ol>
-        <HotkeyRow />
+        {!isMobile && <HotkeyRow />}
+        <KeyRow p={p} onSaved={() => loadProfile(false)} />
         <p className="muted small">
           Jev 会参考：下面的目标档案和判断准则、现在几点、今天各项进度、今天已经问过什么（同一件事被拒后再问，仍然不做）。
           Jev 以英文为主要训练语言，中文也能用；判断不准时，把准则写得更具体最有效。
